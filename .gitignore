@@ -1,5 +1,7 @@
 node_modules
-dist
 dist-ssr
 *.local
 .vite
+
+# 后端构建产物（服务器上重新 npm run build）
+server/dist
