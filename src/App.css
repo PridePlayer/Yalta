@@ -48,6 +48,436 @@ body::before {
     repeating-linear-gradient(90deg, transparent 0, transparent 3px, rgba(0,0,0,0.5) 3px, rgba(0,0,0,0.5) 4px);
 }
 
+/* ============ 大厅（Lobby） ============ */
+.lobby {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+.lobby-card {
+  width: 100%;
+  max-width: 460px;
+  background: linear-gradient(180deg, var(--bg-paper-light), var(--bg-paper));
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 32px 36px;
+  box-shadow: inset 0 0 30px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.4);
+  position: relative;
+}
+.lobby-card::before, .lobby-card::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--gold-dim);
+}
+.lobby-card::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
+.lobby-card::after { bottom: 6px; right: 6px; border-left: none; border-top: none; }
+.lobby-card-wide { max-width: 720px; }
+.lobby-header {
+  text-align: center;
+  margin-bottom: 8px;
+}
+.lobby-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 8px;
+  color: var(--gold);
+  text-shadow: 0 0 16px rgba(201,169,97,0.2);
+  padding-left: 8px;
+  display: inline-block;
+}
+.lobby-ornament {
+  color: var(--gold-dim);
+  font-size: 14px;
+  margin: 0 10px;
+}
+.lobby-sub {
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-soft);
+  letter-spacing: 3px;
+  font-style: italic;
+  margin: 6px 0 20px;
+}
+.lobby-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.lobby-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+}
+.lobby-field > span {
+  font-size: 12px;
+  color: var(--ink-soft);
+  letter-spacing: 2px;
+}
+.lobby-field input {
+  background: var(--bg-ink);
+  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--gold-dim);
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  color: var(--ink-main);
+  padding: 8px 4px;
+  font-size: 14px;
+  font-family: Georgia, SimSun, serif;
+  outline: none;
+  border-radius: 0;
+  padding-right: 56px;
+}
+.lobby-field input:focus {
+  border-bottom-color: var(--gold);
+}
+.lobby-mini-btn {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: var(--ink-soft);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  border-radius: 2px;
+  letter-spacing: 1px;
+}
+.lobby-mini-btn:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+.role-pick-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.role-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: Georgia, SimSun, serif;
+  text-align: left;
+}
+.role-pick:hover {
+  background: rgba(201,169,97,0.08);
+}
+.role-pick.active {
+  background: rgba(201,169,97,0.15);
+  border-color: var(--gold);
+  box-shadow: 0 0 10px rgba(201,169,97,0.2);
+}
+.role-pick-nation {
+  font-size: 10px;
+  letter-spacing: 2px;
+  font-style: italic;
+}
+.role-pick-name {
+  font-size: 13px;
+  color: var(--ink-main);
+  letter-spacing: 2px;
+}
+.lobby-hint {
+  font-size: 11px;
+  color: var(--ink-faded);
+  font-style: italic;
+  letter-spacing: 1px;
+  margin: 4px 0;
+}
+.lobby-error {
+  font-size: 12px;
+  color: var(--crimson-bright);
+  background: rgba(139,44,44,0.15);
+  border-left: 2px solid var(--crimson);
+  padding: 8px 10px;
+  border-radius: 0 2px 2px 0;
+  letter-spacing: 1px;
+}
+.lobby-btn-primary {
+  margin-top: 8px;
+  background: linear-gradient(180deg, #3a2818, #2a1d10);
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  font-size: 14px;
+  letter-spacing: 6px;
+  font-family: Georgia, SimSun, serif;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 12px;
+  transition: all 0.2s;
+}
+.lobby-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #4a3420, #3a2418);
+  border-color: var(--gold);
+  color: #e8d8b0;
+  box-shadow: 0 0 12px rgba(201,169,97,0.2);
+}
+.lobby-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.lobby-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
+  font-size: 12px;
+  letter-spacing: 3px;
+  padding: 8px 16px;
+  cursor: pointer;
+  border-radius: 2px;
+  font-family: Georgia, SimSun, serif;
+  transition: all 0.2s;
+}
+.lobby-btn-ghost:hover {
+  border-color: var(--crimson);
+  color: var(--crimson-bright);
+}
+
+/* 房间等待厅 */
+.lobby-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.lobby-section h3 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--gold);
+  letter-spacing: 4px;
+  font-weight: 600;
+}
+.lobby-details > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--gold);
+  letter-spacing: 4px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.seat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+.seat-grid-tight {
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+.seat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: Georgia, SimSun, serif;
+  text-align: left;
+  color: inherit;
+}
+.seat-card:hover:not(:disabled) {
+  background: rgba(201,169,97,0.08);
+}
+.seat-card.mine {
+  background: rgba(201,169,97,0.15);
+  border-color: var(--gold);
+  box-shadow: 0 0 10px rgba(201,169,97,0.2);
+}
+.seat-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.seat-card-mini {
+  padding: 8px;
+  font-size: 11px;
+}
+.seat-nation {
+  font-size: 10px;
+  letter-spacing: 2px;
+  font-style: italic;
+}
+.seat-name {
+  font-size: 13px;
+  color: var(--ink-main);
+  letter-spacing: 1px;
+}
+.seat-card-mini .seat-name { font-size: 11px; }
+.seat-status {
+  font-size: 10px;
+  color: var(--ink-faded);
+  font-style: italic;
+  letter-spacing: 1px;
+}
+.player-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.player-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 12px;
+}
+.player-list li.me {
+  background: rgba(201,169,97,0.1);
+  border-color: var(--gold-dim);
+}
+.player-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.player-dot.on { background: #6b8a5a; box-shadow: 0 0 4px #6b8a5a; }
+.player-dot.off { background: var(--ink-faded); }
+.player-name {
+  color: var(--ink-main);
+  flex: 1;
+  letter-spacing: 1px;
+}
+.player-role {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-style: italic;
+}
+.player-tag {
+  font-size: 10px;
+  color: var(--gold);
+  border: 1px solid var(--gold-dim);
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 1px;
+}
+.lobby-action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ============ 角色横幅 & 反馈（ActionPanel） ============ */
+.role-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.role-name {
+  color: var(--gold);
+  letter-spacing: 2px;
+  font-weight: 600;
+}
+.role-feedback {
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 2px;
+}
+.role-feedback.ok {
+  color: #80c0a8;
+  background: rgba(58,107,90,0.2);
+}
+.role-feedback.err {
+  color: var(--crimson-bright);
+  background: rgba(139,44,44,0.2);
+}
+
+/* ============ 私密情报浮层（IntelPanel） ============ */
+.intel-stack {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100;
+  max-width: 340px;
+}
+.intel-card {
+  background: linear-gradient(180deg, var(--bg-paper-light), var(--bg-paper));
+  border: 1px solid var(--olive);
+  border-left: 3px solid var(--olive);
+  border-radius: 2px;
+  padding: 12px 14px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  animation: intel-slide 0.3s ease;
+}
+@keyframes intel-slide {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.intel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.intel-stamp {
+  font-size: 11px;
+  color: #b8c9a0;
+  border: 1px solid var(--olive);
+  padding: 1px 6px;
+  border-radius: 2px;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+.intel-meta {
+  flex: 1;
+  font-size: 10px;
+  color: var(--ink-faded);
+  font-style: italic;
+  letter-spacing: 1px;
+}
+.intel-close {
+  background: transparent;
+  border: none;
+  color: var(--ink-faded);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.intel-close:hover {
+  color: var(--crimson-bright);
+}
+.intel-body {
+  font-size: 12px;
+  color: var(--ink-main);
+  line-height: 1.6;
+  margin: 0;
+}
+
 .app {
   position: relative;
   z-index: 1;
