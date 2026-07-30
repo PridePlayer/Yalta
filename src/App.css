@@ -488,7 +488,7 @@ body::before {
 
 /* ========== 报头 ========== */
 .masthead {
-  padding: 14px 24px 10px;
+  padding: 10px 18px 8px;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(201,169,97,0.04), transparent);
 }
@@ -498,16 +498,16 @@ body::before {
   align-items: baseline;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .masthead-title-row .title-cn {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: 8px;
+  letter-spacing: 6px;
   color: var(--gold);
   text-shadow: 0 0 16px rgba(201, 169, 97, 0.2);
-  padding-left: 8px;
+  padding-left: 6px;
 }
 
 .masthead-meta {
@@ -529,9 +529,9 @@ body::before {
 /* ========== 主区域：三栏布局 ========== */
 .app-main {
   display: grid;
-  grid-template-columns: 280px 1fr 260px;
-  gap: 14px;
-  padding: 14px 20px;
+  grid-template-columns: 260px 1fr 280px;
+  gap: 12px;
+  padding: 12px 18px;
   flex: 1;
   min-height: 0;
 }
@@ -540,20 +540,22 @@ body::before {
 .app-right {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .app-center {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .app-bottom {
-  padding: 0 20px 14px;
+  padding: 0 18px 10px;
   flex-shrink: 0;
-  max-height: 220px;
+  max-height: 200px;
 }
 
 /* 响应式：窄屏折叠为单栏 */
@@ -844,14 +846,17 @@ input[type='range'] {
 .phase-bar {
   display: flex;
   gap: 8px;
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .btn-advance, .btn-reset {
   flex: 1;
-  padding: 8px;
+  padding: 9px 8px;
   cursor: pointer;
   border-radius: 2px;
   font-size: 12px;
@@ -1520,7 +1525,6 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: 100%;
   min-height: 0;
 }
 
@@ -1528,15 +1532,13 @@ input[type='range'] {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  flex: 1;
-  overflow-y: auto;
   padding-right: 4px;
-  min-height: 0;
 }
 
 .action-card-item {
   background: linear-gradient(180deg, var(--bg-paper-light), var(--bg-paper));
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border-light);
   border-radius: 3px;
   padding: 10px 12px;
   cursor: pointer;
@@ -1545,11 +1547,14 @@ input[type='range'] {
 }
 .action-card-item:hover:not(.disabled) {
   border-color: var(--gold-dim);
+  border-left-color: var(--gold);
   background: linear-gradient(180deg, #3a2e1f, var(--bg-paper-light));
+  transform: translateX(2px);
 }
 .action-card-item.expanded {
   border-color: var(--gold);
-  box-shadow: 0 0 12px rgba(201,169,97,0.15);
+  border-left-color: var(--gold);
+  box-shadow: 0 0 14px rgba(201,169,97,0.18);
 }
 .action-card-item.disabled {
   cursor: not-allowed;

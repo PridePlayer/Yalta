@@ -4,6 +4,7 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import { GameServer } from './gameServer'
 import { canPerformAction, canAdvancePhase, canReset } from './permissions'
+import { runAIPlayers, resetAIActed } from './aiPlayer'
 import type { ClientMessage, ServerMessage, Player, PlayerRole, RoomInfo } from '../../shared/protocol'
 import { roleNation, isLeader } from '../../shared/protocol'
 import type { Nation } from '../../shared/domain/types'
@@ -15,6 +16,10 @@ interface Room {
   players: Map<string, { ws: WebSocket; player: Player }>
   game: GameServer
   started: boolean
+  /** 单人模式：AI 接管未被真人占据的队长位 */
+  singlePlayer: boolean
+  /** AI 控制的国家列表 */
+  aiNations: Nation[]
 }
 
 const rooms = new Map<string, Room>()
@@ -30,6 +35,8 @@ function getOrCreateRoom(code: string): Room {
       players: new Map(),
       game: new GameServer(),
       started: false,
+      singlePlayer: false,
+      aiNations: [],
     })
   }
   return rooms.get(code)!
@@ -64,6 +71,22 @@ function broadcastRoomInfo(room: Room): void {
 
 function broadcastState(room: Room): void {
   broadcast(room, { type: 'STATE', state: room.game.serialize() })
+}
+
+/** 触发 AI 玩家行动（单人模式） */
+function triggerAI(room: Room): void {
+  if (!room.singlePlayer || room.aiNations.length === 0) return
+  const state = room.game.serialize()
+  runAIPlayers({
+    nations: room.aiNations,
+    state,
+    act: (action) => room.game.performAction(action),
+    log: (text) => {
+      broadcast(room, { type: 'LOG', entries: [{ id: `ai-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, session: state.session, phase: state.phase, text, kind: 'info' as const }] })
+    },
+  })
+  // AI 行动后广播新状态
+  broadcastState(room)
 }
 
 function handleJoin(room: Room, ws: WebSocket, playerName: string, preferredRole?: PlayerRole): string {
@@ -130,8 +153,25 @@ function handleMessage(ws: WebSocket, raw: string): void {
       }
       room.started = true
       room.game.reset(msg.seed ?? 20250204)
+      // 检测单人模式：统计真人队长数量，未被占据的队长位由 AI 接管
+      const occupiedLeaders = new Set<Nation>()
+      for (const [, c] of room.players) {
+        if (isLeader(c.player.role)) {
+          const n = roleNation(c.player.role)
+          if (n) occupiedLeaders.add(n)
+        }
+      }
+      const allLeaders: Nation[] = ['US', 'UK', 'SU']
+      room.aiNations = allLeaders.filter((n) => !occupiedLeaders.has(n))
+      room.singlePlayer = room.aiNations.length >= 1
+      if (room.singlePlayer) {
+        broadcast(room, { type: 'LOG', entries: [{ id: `ai-start-${Date.now()}`, session: 1, phase: 'TOPIC', text: `〔系统〕单人模式启用，AI 接管：${room.aiNations.map(n => n === 'US' ? '美' : n === 'UK' ? '英' : '苏').join('、')}`, kind: 'info' }] })
+      }
+      resetAIActed()
       broadcastRoomInfo(room)
       broadcastState(room)
+      // 开局即触发一次 AI（TOPIC 阶段无动作，但若有危机则处理）
+      triggerAI(room)
       break
     }
 
@@ -176,6 +216,12 @@ function handleMessage(ws: WebSocket, raw: string): void {
       }
       broadcastState(room)
       broadcastRoomInfo(room)
+      // 推进后重置 AI 行动标记，并触发 AI 决策
+      if (room.singlePlayer) {
+        resetAIActed()
+        // 延迟触发，模拟 AI 思考
+        setTimeout(() => triggerAI(room), 600)
+      }
       break
     }
 
@@ -185,6 +231,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
         return
       }
       room.game.reset(msg.seed ?? 20250204)
+      resetAIActed()
       broadcastState(room)
       break
     }

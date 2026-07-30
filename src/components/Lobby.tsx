@@ -184,6 +184,15 @@ export function Lobby() {
 
   const amLeader = self ? isLeader(self.role) : false
   const leaderPlayers = room.players.filter((p) => isLeader(p.role))
+  const occupiedLeaderNations = new Set(
+    leaderPlayers.map((p) => {
+      const r = p.role
+      if (typeof r === 'string' && r.startsWith('LEADER_')) return r.slice(7)
+      return ''
+    }),
+  )
+  const isSinglePlayer = leaderPlayers.length === 1
+  const aiNations = ['US', 'UK', 'SU'].filter((n) => !occupiedLeaderNations.has(n))
 
   return (
     <div className="lobby">
@@ -196,6 +205,12 @@ export function Lobby() {
         <p className="lobby-sub">
           当前 {room.players.length} 位代表在线 · 等待队长开局
         </p>
+
+        {isSinglePlayer && (
+          <p className="lobby-hint" style={{ background: 'rgba(107,107,58,0.12)', border: '1px solid var(--olive)', padding: '8px 12px', borderRadius: '2px', margin: '0 0 12px' }}>
+            单人模式：你将独自对战 AI 控制的 {aiNations.map((n) => (n === 'US' ? '美' : n === 'UK' ? '英' : '苏')).join('、')} 方代表团。AI 会自动签发军令、窃听与应对危机。
+          </p>
+        )}
 
         {/* 队长席位选择 */}
         <div className="lobby-section">
