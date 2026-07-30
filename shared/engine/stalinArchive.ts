@@ -1,5 +1,5 @@
 import type { StalinArchiveState, MetricDelta } from '../domain/types'
-import { randInt, createRng, rollCheck } from './random'
+import { createRng, rollCheck } from './random'
 
 // 斯大林情报库事件链，规则见 rules.md 第 3.2 节
 // 触发：波兰问题僵局（连续 2 会期未达成波兰协议）

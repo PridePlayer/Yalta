@@ -5,7 +5,6 @@
 import type {
   MilitaryOrder,
   WiretapOrder,
-  WiretapTier,
   VenueId,
   Nation,
   SessionPhase,
@@ -103,5 +102,4 @@ export function getWiretapTargets(): { venueId: VenueId; venueName: string; targ
 }
 
 // 导出类型供组件使用
-export type { MetricDelta, WiretapOrder, WiretapTier, VenueId, Nation, Petition } from '@shared/domain/types'
 export type { GameAction, SerializableGameState }

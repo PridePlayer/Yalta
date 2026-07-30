@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react'
 import { SEATS } from '@shared/data/seats'
 import { connect, disconnect, send, clearError } from '../net/client'
 import { useConnection, useRoom, useSelf } from '../net/client'
-import { roleLabel, isLeader, roleNation } from '@shared/protocol'
+import { roleLabel, isLeader } from '@shared/protocol'
 import type { PlayerRole, LeaderRole } from '@shared/protocol'
 import type { Nation } from '@shared/domain/types'
 

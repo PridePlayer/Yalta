@@ -65,7 +65,6 @@ export function createBulletin(health: number, session: number): MedicalBulletin
 /** 罗斯福去世后的杜鲁门继任处理 */
 export function handleTrumanSuccession(
   roosevelt: RooseveltState,
-  health: number,
 ): { newRoosevelt: RooseveltState; newHealth: number; deltas: MetricDelta[] } {
   // 健康重置为 70，但谈判筹码 -30%（以美方支持度下降体现）
   const newRoosevelt: RooseveltState = {

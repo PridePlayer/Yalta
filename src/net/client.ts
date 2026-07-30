@@ -84,8 +84,9 @@ function handleMessage(raw: string) {
       // 从房间玩家列表里找出自己的 playerId（按 name 匹配最稳）
       // 服务器在 connection 时已记录 playerId，并通过 ROOM_INFO 广播
       // 我们用最后一次 JOIN 的 playerName 匹配
-      const me = lastJoinPayload
-        ? msg.room.players.find((p) => p.name === lastJoinPayload.playerName)
+      const joinPayload = lastJoinPayload
+      const me = joinPayload
+        ? msg.room.players.find((p) => p.name === joinPayload.playerName)
         : null
       setStore({ room: msg.room, playerId: me?.id ?? store.playerId })
       break

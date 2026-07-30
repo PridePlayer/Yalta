@@ -310,7 +310,7 @@ export class GameServer {
     this.state = { ...this.state, medicalBulletins: [...this.state.medicalBulletins, bulletin], roosevelt: { ...this.state.roosevelt, bulletinDelivered: true } }
     newLogs.push(this.appendLog(`医疗简报（第${this.state.session}会期）：${bulletin.assessment}${bulletin.urgent ? '【紧急】' : ''}`, bulletin.urgent ? 'crisis' : 'info'))
     if (newStatus === 'DECEASED' && !this.state.roosevelt.trumanSucceeded) {
-      const { newRoosevelt, newHealth: trumanHealth, deltas } = handleTrumanSuccession(this.state.roosevelt, newHealth)
+      const { newRoosevelt, newHealth: trumanHealth, deltas } = handleTrumanSuccession(this.state.roosevelt)
       this.state = { ...this.state, roosevelt: newRoosevelt, rooseveltHealth: trumanHealth }
       newLogs.push(this.appendLog('噩耗传来——罗斯福总统于会期中段溘然长逝。副总统杜鲁门火速继任，飞抵雅尔塔。美方谈判筹码骤减。', 'crisis'))
       this.state = applyDeltas(this.state, deltas)
