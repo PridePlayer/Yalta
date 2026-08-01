@@ -34,6 +34,9 @@ if [ ! -d "$PROJECT_DIR" ]; then
 fi
 cd "$PROJECT_DIR" || exit 1
 
+# 0) 解决 git "dubious ownership"：root 运行时仓库属主非 root 会直接报错拦截
+git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
+
 # 1) 拉取最新代码
 log "拉取最新代码"
 git pull || { err "git pull 失败（可能有本地未提交改动）"; exit 1; }
