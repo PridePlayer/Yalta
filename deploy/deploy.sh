@@ -59,6 +59,17 @@ if [ ! -f "server-dist/index.cjs" ]; then
   exit 1
 fi
 
+# 4) 先停旧服务并清理 8080 端口，防止旧僵尸进程占用导致 EADDRINUSE 重启循环
+log "停止旧服务并清理 8080 端口占用（若有）"
+$SUDO systemctl stop "$SERVICE" 2>/dev/null || true
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k 8080/tcp 2>/dev/null || true
+elif command -v ss >/dev/null 2>&1; then
+  PID="$(ss -ltnp 2>/dev/null | grep ':8080' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)"
+  [ -n "$PID" ] && kill -9 "$PID" 2>/dev/null || true
+fi
+sleep 1
+
 # 5) 重启后端 systemd 服务
 if command -v systemctl >/dev/null 2>&1; then
   log "重启后端服务：$SERVICE"
