@@ -1,0 +1,24 @@
+# ============================================================
+# 雅尔塔会议 — 后端 WebSocket 服务（systemd）
+# 放置位置：/etc/systemd/system/yalta-ws.service
+# 启用：sudo systemctl daemon-reload && sudo systemctl enable --now yalta-ws
+# 注意：路径已更新为新构建产物 server-dist/index.cjs（旧路径 server/dist/server/src/index.js 已失效）
+# ============================================================
+
+[Unit]
+Description=Yalta WebSocket Server
+After=network.target
+
+[Service]
+Type=simple
+User=admin
+WorkingDirectory=/www/wwwroot/yalta.stellamp.me/Yalta
+# 生产直接用构建好的 CJS bundle；ws 作为外部依赖需 node_modules 中存在（npm install 已装）
+ExecStart=/usr/local/bin/node /www/wwwroot/yalta.stellamp.me/Yalta/server-dist/index.cjs
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=8080
+
+[Install]
+WantedBy=multi-user.target

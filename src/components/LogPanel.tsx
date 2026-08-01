@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import { useGameState } from '../state/gameStore'
 import type { LogEntry } from '@shared/domain/types'
 
@@ -33,16 +32,8 @@ function groupBySession(logs: LogEntry[]): { session: number; entries: LogEntry[
 
 export function LogPanel() {
   const state = useGameState()
-  const scrollRef = useRef<HTMLDivElement>(null)
   const logs = state?.logs ?? [] // 正序，最新在底部
   const groups = groupBySession(logs)
-
-  // 新日志自动滚到底
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [logs.length])
 
   return (
     <div className="panel panel-log">
@@ -52,12 +43,8 @@ export function LogPanel() {
         <span className="heading-ornament">❦</span>
       </div>
 
-      <div className="ticker-strip">
-        <span className="ticker-dot" />
-        <span className="ticker-text">接收中 · 利瓦季亚宫专线</span>
-      </div>
-
-      <div className="log-scroll" ref={scrollRef}>
+      {/* 纪事全文：不再内部限制滚动，随内容自然展开（整栏滚动） */}
+      <div className="log-list">
         {groups.map((g) => (
           <div key={g.session} className="log-session">
             <div className="log-session-divider">

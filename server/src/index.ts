@@ -9,7 +9,7 @@ import type { ClientMessage, ServerMessage, Player, PlayerRole, RoomInfo } from 
 import { roleNation, isLeader } from '../../shared/protocol'
 import type { Nation } from '../../shared/domain/types'
 
-const PORT = 8080
+const PORT = Number(process.env.PORT) || 8080
 
 interface Room {
   code: string
@@ -254,7 +254,7 @@ function handleDisconnect(ws: WebSocket): void {
   }, 30000)
 }
 
-const wss = new WebSocketServer({ port: PORT, path: '/ws' })
+const wss = new WebSocketServer({ port: PORT, host: '127.0.0.1', path: '/ws' })
 
 wss.on('connection', (ws, req) => {
   // 从 URL 提取房间码和玩家名：/ws?room=XXXX&name=YYY

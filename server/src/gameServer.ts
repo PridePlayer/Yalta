@@ -1,7 +1,7 @@
 // 状态权威服务器：持有权威 GameState，裁决动作，生成私密情报
 // 从前端 gameStore 迁移而来，去除 React 依赖，增加权限检查与私密情报
 
-import type { GameState, MilitaryOrder, MilitaryResult, MetricDelta, WiretapOrder, WiretapResult, WiretapTier, VenueId, Nation, LogEntry, Petition } from '../../shared/domain/types'
+import type { GameState, MilitaryOrder, MilitaryResult, MetricDelta, WiretapOrder, WiretapResult, WiretapTier, VenueId, Nation, LogEntry, Petition, Protocol, ProtocolDraft, ProtocolTopic } from '../../shared/domain/types'
 import { createInitialState, applyDeltas } from '../../shared/engine/metrics'
 import { resolveMilitaryOrder } from '../../shared/engine/military'
 import { resolveWiretap } from '../../shared/engine/wiretap'
@@ -10,6 +10,8 @@ import { invokeStalinArchive, settleStalinArchiveAtSessionEnd, checkTrigger as c
 import { checkOutbreakTrigger, triggerOutbreak, respondToOutbreak, resolvePolandUprising } from '../../shared/engine/polandUprising'
 import { settleUKElectionAtSessionEnd } from '../../shared/engine/ukElection'
 import { generatePetitions, handlePetition } from '../../shared/engine/petitions'
+import { createProtocol, checkSignConditions, applyProtocol, isFullyAgreed } from '../../shared/engine/protocol'
+import { computeSettlement } from '../../shared/engine/settlement'
 import { SEATS } from '../../shared/data/seats'
 import { VENUES } from '../../shared/data/venues'
 import type { GameAction, PrivateIntel, SerializableGameState, LogEntryDTO } from '../../shared/protocol'
@@ -26,6 +28,19 @@ const PHASE_NARRATIVE: Record<string, string> = {
 }
 
 const NATION_HAN: Record<Nation, string> = { US: '美方', UK: '英方', SU: '苏方' }
+const TOPIC_HAN: Record<ProtocolTopic, string> = {
+  GERMANY: '德国问题',
+  POLAND: '波兰问题',
+  FAR_EAST: '远东问题',
+  UN: '联合国',
+  OTHER: '其他',
+}
+function nationHan(n: Nation): string {
+  return NATION_HAN[n]
+}
+function topicHan(t: ProtocolTopic): string {
+  return TOPIC_HAN[t]
+}
 const KEY_HAN: Record<string, string> = {
   publicSupport: '国内民望', intelPoints: '情报储备', oppositionPressure: '反对派压力',
   colonyUnrest: '殖民地动荡', intlOpinion: '国际舆论', rooseveltHealth: '罗斯福健康',
@@ -73,8 +88,11 @@ export class GameServer {
         consecutiveColonyIgnored: s.petitions.consecutiveColonyIgnored,
         colonyUprisingTriggered: s.petitions.colonyUprisingTriggered,
       },
+      protocols: s.protocols,
+      achievedGoals: s.achievedGoals,
+      settlement: s.settlement,
       logs: s.logs,
-      gameEnded: s.session >= TOTAL_SESSIONS && s.phase === 'PRESS' && s.logs.some((l) => l.text.includes('闭幕')),
+      gameEnded: s.settlement !== null,
     }
   }
 
@@ -88,6 +106,8 @@ export class GameServer {
       case 'POLAND_RESPONSE': return this.doPolandResponse(action.response)
       case 'POLAND_RESOLVE': return this.doPolandResolve()
       case 'PETITION_HANDLE': return this.doPetitionHandle(action.petitionId, action.handling)
+      case 'PROPOSE_PROTOCOL': return this.doProposeProtocol(action.draft, action.proposedBy)
+      case 'SIGN_PROTOCOL': return this.doSignProtocol(action.protocolId, action.nation)
     }
   }
 
@@ -252,6 +272,63 @@ export class GameServer {
     return { success: true, message: '已处置', newLogs }
   }
 
+  private doProposeProtocol(draft: ProtocolDraft, proposedBy: Nation): ActionResult {
+    this.state = { ...this.state, actionCounter: this.state.actionCounter + 1 }
+    const id = `p-${this.state.session}-${this.state.actionCounter}`
+    const protocol = createProtocol(draft, proposedBy, id, this.state.session)
+    // 提案国即签署方之一，已在 createProtocol 中自动同意
+    this.state = { ...this.state, protocols: [...this.state.protocols, protocol] }
+    const newLogs: LogEntry[] = [
+      this.appendLog(
+        `外交提案——${nationHan(protocol.proposedBy)}提出《${protocol.title}》（议题：${topicHan(protocol.topic)}，激进度 ${protocol.radicalness}）。待各方签署。`,
+        'action',
+      ),
+    ]
+    return { success: true, message: '提案已提交', newLogs }
+  }
+
+  private doSignProtocol(protocolId: string, nation: Nation): ActionResult {
+    const protocol = this.state.protocols.find((p) => p.id === protocolId)
+    if (!protocol) {
+      return { success: false, message: '协议不存在', newLogs: [] }
+    }
+    if (protocol.status !== 'PROPOSED') {
+      return { success: false, message: '该协议已非待签状态', newLogs: [] }
+    }
+    if (!protocol.signatories.includes(nation)) {
+      return { success: false, message: '非本约签署方', newLogs: [] }
+    }
+    if (protocol.agreed.includes(nation)) {
+      return { success: false, message: '贵方已签署', newLogs: [] }
+    }
+    const check = checkSignConditions(this.state, protocol, nation)
+    if (!check.ok) {
+      return { success: false, message: check.reason ?? '无法签署', newLogs: [] }
+    }
+    this.state = { ...this.state, actionCounter: this.state.actionCounter + 1 }
+    const agreed = [...protocol.agreed, nation]
+    const updated: Protocol = { ...protocol, agreed }
+    const newLogs: LogEntry[] = [
+      this.appendLog(`签约——${nationHan(nation)}签署《${protocol.title}》。`, 'action'),
+    ]
+
+    if (isFullyAgreed(updated)) {
+      // 集齐签署 → 生效
+      const { newState, deltas, narrative } = applyProtocol(this.state, updated)
+      const signed: Protocol = { ...updated, status: 'SIGNED', signedSession: this.state.session }
+      this.state = { ...newState, protocols: this.state.protocols.map((p) => (p.id === protocol.id ? signed : p)) }
+      newLogs.push(this.appendLog(narrative, 'result'))
+      const dl = this.logDeltas(deltas)
+      if (dl) newLogs.push(dl)
+    } else {
+      this.state = {
+        ...this.state,
+        protocols: this.state.protocols.map((p) => (p.id === protocol.id ? updated : p)),
+      }
+    }
+    return { success: true, message: '已签署', newLogs }
+  }
+
   /** 推进阶段/会期 */
   advancePhase(): LogEntry[] {
     const idx = PHASE_ORDER.indexOf(this.state.phase)
@@ -263,7 +340,14 @@ export class GameServer {
       newLogs.push(this.appendLog(PHASE_NARRATIVE[to], 'info'))
     } else {
       if (this.state.session >= TOTAL_SESSIONS) {
+        // 第 7 会期闭幕 → 结算（rules.md §6）
+        const settlement = computeSettlement(this.state)
+        this.state = { ...this.state, settlement }
         newLogs.push(this.appendLog('1945年2月11日，雅尔塔会议闭幕。三巨头签署公报，历史就此定格。', 'info'))
+        newLogs.push(this.appendLog(`〔结算〕${settlement.endingTitle}——${settlement.endingText}`, 'result'))
+        for (const e of settlement.specialEndings) {
+          newLogs.push(this.appendLog(`〔结局〕${e}`, 'crisis'))
+        }
         return newLogs
       }
       // 会期末事件链结算

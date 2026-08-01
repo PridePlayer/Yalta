@@ -54,6 +54,9 @@ export function createInitialState(seed: number): GameState {
       consecutiveColonyIgnored: 0,
       colonyUprisingTriggered: false,
     },
+    protocols: [],
+    achievedGoals: { US: [], UK: [], SU: [] },
+    settlement: null,
     events: [],
     logs: [
       {
@@ -109,4 +112,13 @@ export function getMetric(state: GameState, nation: Nation, key: string): number
   if (key === 'intlOpinion') return state.intlOpinion
   if (key === 'rooseveltHealth') return state.rooseveltHealth
   return state.metrics[nation][key as keyof NationMetrics]
+}
+
+/**
+ * 协议激进度上限（rules.md §4.2 / §1.3）
+ * maxRadicalness = 100 - max(0, oppositionPressure - 50) * 2
+ * 压力值 50 → 上限 100；70 → 60；90 → 20
+ */
+export function maxRadicalness(oppositionPressure: number): number {
+  return 100 - Math.max(0, oppositionPressure - 50) * 2
 }

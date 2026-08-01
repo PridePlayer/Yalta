@@ -10,9 +10,14 @@ import type {
   WiretapOrder,
   WiretapTier,
   VenueId,
+  ProtocolTopic,
+  ProtocolDraft,
+  Protocol,
 } from '../../shared/domain/types'
+import { PROTOCOL_TOPIC_LABEL } from '../../shared/domain/types'
 import { SEATS } from '../../shared/data/seats'
 import { VENUES } from '../../shared/data/venues'
+import { defaultBeneficiary } from '../../shared/engine/protocol'
 import type { SerializableGameState } from '../../shared/protocol'
 import type { GameServer } from './gameServer'
 import type { ActionResult } from './gameServer'
@@ -61,6 +66,9 @@ export function runAIPlayers(ctx: AIContext): void {
   const { nations, state, act, log } = ctx
 
   for (const nation of nations) {
+    // 1) 先处理待签协议（不受单动作限制，确保人类提案能被 AI 自动签署）
+    handlePendingSignatures(nation, state, act, log)
+
     if (hasActed(nation, state)) continue
 
     const action = decideAction(nation, state)
@@ -85,10 +93,84 @@ function decideAction(nation: Nation, state: SerializableGameState): GameAction 
     case 'MILITARY':
       return decideMilitary(nation, state)
     case 'VENUE':
-      return decideWiretap(nation, state)
+      return decidePropose(nation, state) ?? decideWiretap(nation, state)
+    case 'CRISIS':
+      return decidePropose(nation, state)
     default:
       return null
   }
+}
+
+// ========== 协议：AI 自动签署 + 提案 ==========
+
+/** AI 自动签署对其有利（或不太吃亏）的待签协议 */
+function handlePendingSignatures(
+  nation: Nation,
+  state: SerializableGameState,
+  act: (a: GameAction) => ActionResult,
+  log: (t: string) => void,
+): void {
+  for (const p of state.protocols as Protocol[]) {
+    if (p.status !== 'PROPOSED') continue
+    if (!p.signatories.includes(nation) || p.agreed.includes(nation)) continue
+    if (!aiSignEligible(state, p, nation)) continue
+    // 仅签署对自己不太吃亏的协议（受益 >= -15）
+    if (p.beneficiary[nation] < -15) continue
+    log(`〔AI〕${nationLabel(nation)}审阅《${p.title}》，提笔签署。`)
+    act({ kind: 'SIGN_PROTOCOL', protocolId: p.id, nation })
+  }
+}
+
+/** 签署资格（基于序列化状态字段的轻量校验，等价于服务器 checkSignConditions） */
+function aiSignEligible(state: SerializableGameState, p: Protocol, nation: Nation): boolean {
+  const opp = state.metrics[nation].oppositionPressure
+  const cap = 100 - Math.max(0, opp - 50) * 2
+  if (p.radicalness > cap) return false
+  if (nation === 'UK' && state.ukElection.churchillRetired) return false
+  if (nation === 'US' && state.roosevelt.status === 'DECEASED' && !state.roosevelt.trumanSucceeded) return false
+  return true
+}
+
+/** AI 提案：在分会场/危机阶段提出符合本国战略目标的协议草案 */
+function decidePropose(nation: Nation, state: SerializableGameState): GameAction | null {
+  // 每会期每国至多提案一次（基于序列化快照判断）
+  const alreadyProposed = (state.protocols as Protocol[]).some(
+    (p) => p.proposedBy === nation && p.proposedSession === state.session,
+  )
+  if (alreadyProposed) return null
+
+  const topicByNation: Record<Nation, ProtocolTopic[]> = {
+    US: ['UN', 'FAR_EAST'],
+    UK: ['GERMANY'],
+    SU: ['POLAND', 'GERMANY'],
+  }
+  const candidates = topicByNation[nation]
+  // 选第一个尚无对应已签协议的议题
+  const signedTopics = new Set(
+    (state.protocols as Protocol[]).filter((p) => p.status === 'SIGNED').map((p) => p.topic),
+  )
+  let topic: ProtocolTopic = candidates[0]
+  for (const t of candidates) {
+    if (!signedTopics.has(t)) {
+      topic = t
+      break
+    }
+  }
+
+  const opp = state.metrics[nation].oppositionPressure
+  const cap = 100 - Math.max(0, opp - 50) * 2
+  const radicalness = Math.max(10, Math.min(55, cap))
+
+  const beneficiary = defaultBeneficiary(topic, nation)
+  const draft: ProtocolDraft = {
+    topic,
+    title: `${PROTOCOL_TOPIC_LABEL[topic]}协定`,
+    radicalness,
+    beneficiary,
+    signatories: ['US', 'UK', 'SU'],
+    secret: false,
+  }
+  return { kind: 'PROPOSE_PROTOCOL', draft, proposedBy: nation }
 }
 
 // ========== 危机事件链决策 ==========

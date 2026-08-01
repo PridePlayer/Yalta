@@ -108,6 +108,29 @@ export function canPerformAction(role: PlayerRole, action: GameAction, currentPh
       return { allowed: true }
     }
 
+    case 'PROPOSE_PROTOCOL': {
+      // 协议提案：仅队长
+      if (!isLeader(role)) {
+        return { allowed: false, reason: '仅队长可提出协议草案' }
+      }
+      return { allowed: true }
+    }
+
+    case 'SIGN_PROTOCOL': {
+      // 协议签署：仅队长（签署方归属由服务器依据角色国家校验）
+      if (!isLeader(role)) {
+        return { allowed: false, reason: '仅队长可代表本国签署' }
+      }
+      const nation = roleNation(role)
+      if (!nation) {
+        return { allowed: false, reason: '旁观者无法签署' }
+      }
+      if (action.nation !== nation) {
+        return { allowed: false, reason: '只能以本国身份签署' }
+      }
+      return { allowed: true }
+    }
+
     default:
       return { allowed: false, reason: '未知动作' }
   }

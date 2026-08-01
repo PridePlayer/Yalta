@@ -28,15 +28,18 @@ const POLAND_PHASE_LABEL: Record<PolandUprisingPhase, string> = {
 function ChainCard({
   title,
   status,
+  flag,
   children,
 }: {
   title: string
   status: EventChainStatus
+  flag?: string
   children?: React.ReactNode
 }) {
   return (
     <div className="chain-card">
       <div className="chain-header">
+        {flag && <img className="chain-flag" src={flag} alt="" />}
         <span className="chain-title">{title}</span>
         <span className="chain-status" style={{ color: STATUS_TONE[status], borderColor: STATUS_TONE[status] }}>
           {STATUS_LABEL[status]}
@@ -87,7 +90,7 @@ export function EventChainsPanel() {
         </ChainCard>
 
         {/* 波兰起义 */}
-        <ChainCard title="波兰起义" status={polandStatus}>
+        <ChainCard title="波兰起义" status={polandStatus} flag="/photos/Flag_of_Poland_(1928%E2%80%931980).svg">
           <div className="chain-row">
             <span>当前阶段</span>
             <span className="chain-val">{POLAND_PHASE_LABEL[polandPhase]}</span>

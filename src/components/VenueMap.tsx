@@ -75,6 +75,7 @@ export function VenueMap({ phase }: Props) {
         <span className="heading-ornament">❦</span>
       </div>
 
+      <div className="venue-svg-wrap">
       <svg viewBox="0 0 240 200" className="venue-svg" xmlns="http://www.w3.org/2000/svg">
         {/* 宫殿外轮廓 */}
         <rect x="8" y="4" width="224" height="192" rx="4" fill="none" stroke="#5a4d36" strokeWidth="1.5" strokeDasharray="2 3" />
@@ -148,6 +149,9 @@ export function VenueMap({ phase }: Props) {
           〔当前：{phaseLabel(phase)}〕
         </text>
       </svg>
+      {/* 新闻厅（法新社记者所属 · 法国国旗） */}
+      <img className="venue-flag-fr" src="/photos/Flag_of_France.svg" alt="法国·法新社" title="法国·法新社" />
+      </div>
 
       {/* 头像栏：横排显示三巨头头像 */}
       <div className="leader-row">

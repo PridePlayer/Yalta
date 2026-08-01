@@ -8,6 +8,7 @@ import type {
   VenueId,
   Nation,
   SessionPhase,
+  ProtocolDraft,
 } from '@shared/domain/types'
 import { VENUES } from '@shared/data/venues'
 import type { SerializableGameState, GameAction } from '@shared/protocol'
@@ -77,6 +78,16 @@ export function resolvePolandUprisingAction(): void {
 /** 处理一封抗议信 */
 export function handlePetitionAction(petitionId: string, handling: 'RESPOND' | 'ARCHIVE' | 'REJECT'): void {
   send({ type: 'ACTION', action: { kind: 'PETITION_HANDLE', petitionId, handling } })
+}
+
+/** 提出协议草案（rules.md §4） */
+export function proposeProtocol(draft: ProtocolDraft, proposedBy: Nation): void {
+  send({ type: 'ACTION', action: { kind: 'PROPOSE_PROTOCOL', draft, proposedBy } })
+}
+
+/** 签署协议（rules.md §4.2） */
+export function signProtocol(protocolId: string, nation: Nation): void {
+  send({ type: 'ACTION', action: { kind: 'SIGN_PROTOCOL', protocolId, nation } })
 }
 
 /** 推进到下一阶段 / 下一会期 */

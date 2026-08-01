@@ -17,6 +17,8 @@ import {
   respondToPolandOutbreak,
   resolvePolandUprisingAction,
   handlePetitionAction,
+  proposeProtocol,
+  signProtocol,
 } from '../state/gameStore'
 import { useSelf, useLastActionResult } from '../net/client'
 import { isLeader, roleNation, roleLabel } from '@shared/protocol'
@@ -28,7 +30,15 @@ import type {
   WiretapOrder,
   WiretapTier,
   PetitionSource,
+  ProtocolTopic,
+  ProtocolDraft,
+  ProtocolBeneficiary,
 } from '@shared/domain/types'
+import { PROTOCOL_TOPIC_LABEL } from '@shared/domain/types'
+import { defaultBeneficiary } from '@shared/engine/protocol'
+
+const PROTOCOL_TOPICS: ProtocolTopic[] = ['GERMANY', 'POLAND', 'FAR_EAST', 'UN', 'OTHER']
+const ALL_NATIONS: Nation[] = ['US', 'UK', 'SU']
 
 const NATION_LABEL: Record<Nation, string> = { US: '美', UK: '英', SU: '苏' }
 const ORDER_TYPES: { value: MilitaryOrderType; label: string }[] = [
@@ -54,10 +64,12 @@ interface CardMeta {
   subtitle: string
   nation: Nation | null
   /** 卡牌类型：决定表单内容 */
-  kind: 'military' | 'wiretap' | 'jammer' | 'stalin' | 'poland-outbreak' | 'poland-resolve' | 'petition' | 'empty' | 'ended'
+  kind: 'military' | 'wiretap' | 'jammer' | 'stalin' | 'poland-outbreak' | 'poland-resolve' | 'petition' | 'protocol-propose' | 'protocol-sign' | 'empty' | 'ended'
   /** 是否可执行（权限/条件） */
   playable: boolean
   reason?: string
+  /** 协议签署卡关联的协议 ID */
+  protocolId?: string
 }
 
 export function ActionCard() {
@@ -77,6 +89,18 @@ export function ActionCard() {
   const [intelSeatId, setIntelSeatId] = useState(intelSeats[0].id)
   const [wiretapVenueIdx, setWiretapVenueIdx] = useState(0)
   const [wiretapTier, setWiretapTier] = useState<WiretapTier>('FULL')
+
+  // 协议草案表单状态（rules.md §4）
+  const [protoTopic, setProtoTopic] = useState<ProtocolTopic>('GERMANY')
+  const [protoRadicalness, setProtoRadicalness] = useState(50)
+  const [protoBenefit, setProtoBenefit] = useState<ProtocolBeneficiary>(defaultBeneficiary('GERMANY', 'US'))
+  const [protoSignatories, setProtoSignatories] = useState<Nation[]>([...ALL_NATIONS])
+  const [protoSecret, setProtoSecret] = useState(false)
+  // 切换议题时，按本方利益重置默认受益分配
+  function changeProtoTopic(t: ProtocolTopic) {
+    setProtoTopic(t)
+    setProtoBenefit(defaultBeneficiary(t, myNation ?? 'US'))
+  }
 
   if (!state) return null
 
@@ -193,6 +217,35 @@ export function ActionCard() {
     }
   }
 
+  // 协议：提案卡（分会场 / 危机阶段，队长可提议）
+  if (amLeader && !gameEnded && (state.phase === 'VENUE' || state.phase === 'CRISIS')) {
+    cards.push({
+      id: 'protocol-propose',
+      title: '拟定协议草案',
+      subtitle: '提出议题 · 划定受益 · 邀约签署',
+      nation: myNation,
+      kind: 'protocol-propose',
+      playable: true,
+    })
+  }
+
+  // 协议：签署卡（待签且本方为签署方、尚未同意）
+  if (amLeader && !gameEnded && myNation) {
+    for (const p of state.protocols) {
+      if (p.status === 'PROPOSED' && p.signatories.includes(myNation) && !p.agreed.includes(myNation)) {
+        cards.push({
+          id: `protocol-sign-${p.id}`,
+          title: `签署《${p.title}》`,
+          subtitle: `${PROTOCOL_TOPIC_LABEL[p.topic]} · 激进度 ${p.radicalness}`,
+          nation: myNation,
+          kind: 'protocol-sign',
+          playable: true,
+          protocolId: p.id,
+        })
+      }
+    }
+  }
+
   // 空状态
   if (cards.length === 0 && !gameEnded) {
     cards.push({
@@ -226,20 +279,20 @@ export function ActionCard() {
         {cards.map((c) => {
           const isExpanded = expanded === c.id
           return (
-            <div
-              key={c.id}
-              className={`action-card-item ${isExpanded ? 'expanded' : ''} ${!c.playable ? 'disabled' : ''}`}
-              onClick={() => c.playable && toggleCard(c.id)}
-            >
-              {/* 卡牌头部：头像 + 标题 */}
-              <div className="card-header">
-                {c.nation && <LeaderAvatar nation={c.nation} size={36} />}
-                <div className="card-title-block">
-                  <div className="card-title">{c.title}</div>
-                  <div className="card-subtitle">{c.subtitle}</div>
-                </div>
-                {c.playable && <span className="card-chevron">{isExpanded ? '▾' : '▸'}</span>}
+          <div
+            key={c.id}
+            className={`action-card-item ${isExpanded ? 'expanded' : ''} ${!c.playable ? 'disabled' : ''}`}
+          >
+            {/* 卡牌头部：头像 + 标题 —— 仅头部可点击展开/收起，
+                避免卡片内部的表单、按钮点击冒泡到容器导致自动收起 */}
+            <div className="card-header" onClick={() => c.playable && toggleCard(c.id)}>
+              {c.nation && <LeaderAvatar nation={c.nation} size={36} />}
+              <div className="card-title-block">
+                <div className="card-title">{c.title}</div>
+                <div className="card-subtitle">{c.subtitle}</div>
               </div>
+              {c.playable && <span className="card-chevron">{isExpanded ? '▾' : '▸'}</span>}
+            </div>
 
               {/* 卡牌展开内容 */}
               {isExpanded && c.playable && (
@@ -340,6 +393,44 @@ export function ActionCard() {
                       petitionId={c.id.replace('petition-', '')}
                       onHandle={(handling) => {
                         handlePetitionAction(c.id.replace('petition-', ''), handling)
+                        setExpanded(null)
+                      }}
+                    />
+                  )}
+
+                  {c.kind === 'protocol-propose' && (
+                    <ProtocolForm
+                      topic={protoTopic}
+                      setTopic={changeProtoTopic}
+                      radicalness={protoRadicalness}
+                      setRadicalness={setProtoRadicalness}
+                      benefit={protoBenefit}
+                      setBenefit={setProtoBenefit}
+                      signatories={protoSignatories}
+                      setSignatories={setProtoSignatories}
+                      secret={protoSecret}
+                      setSecret={setProtoSecret}
+                      onSubmit={() => {
+                        const draft: ProtocolDraft = {
+                          topic: protoTopic,
+                          title: `${PROTOCOL_TOPIC_LABEL[protoTopic]}协定`,
+                          radicalness: protoRadicalness,
+                          beneficiary: protoBenefit,
+                          signatories: protoSignatories.length ? protoSignatories : [myNation!],
+                          secret: protoSecret,
+                        }
+                        proposeProtocol(draft, myNation!)
+                        setExpanded(null)
+                      }}
+                    />
+                  )}
+
+                  {c.kind === 'protocol-sign' && c.protocolId && (
+                    <ProtocolSignForm
+                      protocol={state.protocols.find((p) => p.id === c.protocolId)!}
+                      myNation={myNation!}
+                      onSign={() => {
+                        signProtocol(c.protocolId!, myNation!)
                         setExpanded(null)
                       }}
                     />
@@ -495,6 +586,102 @@ function PetitionForm(props: { petitionId: string; onHandle: (h: 'RESPOND' | 'AR
           驳回
         </button>
       </div>
+    </div>
+  )
+}
+
+function ProtocolForm(props: {
+  topic: ProtocolTopic
+  setTopic: (t: ProtocolTopic) => void
+  radicalness: number
+  setRadicalness: (v: number) => void
+  benefit: ProtocolBeneficiary
+  setBenefit: (b: ProtocolBeneficiary) => void
+  signatories: Nation[]
+  setSignatories: (n: Nation[]) => void
+  secret: boolean
+  setSecret: (v: boolean) => void
+  onSubmit: () => void
+}) {
+  const { topic, setTopic, radicalness, setRadicalness, benefit, setBenefit, signatories, setSignatories, secret, setSecret, onSubmit } = props
+  const toggleSignatory = (n: Nation) => {
+    if (signatories.includes(n)) {
+      if (signatories.length === 1) return // 至少保留提案方
+      setSignatories(signatories.filter((x) => x !== n))
+    } else {
+      setSignatories([...signatories, n])
+    }
+  }
+  const setBen = (n: Nation, v: number) => setBenefit({ ...benefit, [n]: v })
+  return (
+    <div className="card-form">
+      <label className="field">
+        <span className="field-label">议题</span>
+        <select value={topic} onChange={(e) => setTopic(e.target.value as ProtocolTopic)}>
+          {PROTOCOL_TOPICS.map((t) => (
+            <option key={t} value={t}>{PROTOCOL_TOPIC_LABEL[t]}</option>
+          ))}
+        </select>
+      </label>
+      <label className="field">
+        <span className="field-label">激进度 <span className="field-value">{radicalness}</span></span>
+        <input type="range" min={0} max={100} value={radicalness} onChange={(e) => setRadicalness(Number(e.target.value))} />
+      </label>
+      <div className="benefit-block">
+        <span className="field-label">受益分配（正为受益，负为受损）</span>
+        {ALL_NATIONS.map((n) => (
+          <label key={n} className="field benefit-row">
+            <span className="benefit-nation">{NATION_LABEL[n]}方</span>
+            <input type="range" min={-100} max={100} value={benefit[n]} onChange={(e) => setBen(n, Number(e.target.value))} />
+            <span className="field-value">{benefit[n] > 0 ? '+' : ''}{benefit[n]}</span>
+          </label>
+        ))}
+      </div>
+      <div className="field">
+        <span className="field-label">签署方</span>
+        <div className="signatory-options">
+          {ALL_NATIONS.map((n) => (
+            <label key={n} className="signatory-chip">
+              <input type="checkbox" checked={signatories.includes(n)} onChange={() => toggleSignatory(n)} />
+              {NATION_LABEL[n]}方
+            </label>
+          ))}
+        </div>
+      </div>
+      <label className="field secret-row">
+        <input type="checkbox" checked={secret} onChange={(e) => setSecret(e.target.checked)} />
+        <span>会场一保密（签署后无指标变化）</span>
+      </label>
+      <button className="btn-seal btn-seal-stalin" onClick={onSubmit}>用印 · 提交草案</button>
+    </div>
+  )
+}
+
+function ProtocolSignForm(props: { protocol: import('@shared/domain/types').Protocol; myNation: Nation; onSign: () => void }) {
+  const { protocol, myNation, onSign } = props
+  const benefitTone = (v: number) => (v > 0 ? 'ben-pos' : v < 0 ? 'ben-neg' : 'ben-zero')
+  return (
+    <div className="card-form protocol-sign">
+      <div className="proto-meta">
+        <div>议题：{PROTOCOL_TOPIC_LABEL[protocol.topic]} · 激进度 {protocol.radicalness}{protocol.secret ? ' · 密约' : ''}</div>
+      </div>
+      <div className="proto-benefit">
+        {ALL_NATIONS.map((n) => (
+          <span key={n} className={`ben-pill ${benefitTone(protocol.beneficiary[n])}`}>
+            {NATION_LABEL[n]} {protocol.beneficiary[n] > 0 ? '+' : ''}{protocol.beneficiary[n]}
+          </span>
+        ))}
+      </div>
+      <div className="proto-signatories">
+        {protocol.signatories.map((n) => (
+          <span key={n} className={`sig-pill ${protocol.agreed.includes(n) ? 'agreed' : ''}`}>
+            {NATION_LABEL[n]}方{protocol.agreed.includes(n) ? '✓' : '…'}
+          </span>
+        ))}
+      </div>
+      <button className="btn-seal btn-seal-crisis" onClick={onSign}>
+        {myNation ? `${NATION_LABEL[myNation]}方签署` : '签署'}
+      </button>
     </div>
   )
 }

@@ -201,6 +201,8 @@ export interface PolandUprisingState {
   sovietConceded: boolean
   /** 最终结果文案 */
   resolution?: string
+  /** 是否经条约外交解决（绕过武装冲突） */
+  polandResolvedByTreaty?: boolean
 }
 
 /** 英国大选倒计时状态（rules.md 3.4） */
@@ -246,6 +248,92 @@ export interface PetitionState {
   consecutiveColonyIgnored: number
   /** 是否已触发殖民地起义危机 */
   colonyUprisingTriggered: boolean
+}
+
+// ========== 协议系统（rules.md §4） ==========
+
+/** 协议议题 */
+export type ProtocolTopic = 'GERMANY' | 'POLAND' | 'FAR_EAST' | 'UN' | 'OTHER'
+
+/** 协议议题中文标签 */
+export const PROTOCOL_TOPIC_LABEL: Record<ProtocolTopic, string> = {
+  GERMANY: '德国问题',
+  POLAND: '波兰问题',
+  FAR_EAST: '远东问题',
+  UN: '联合国',
+  OTHER: '其他',
+}
+
+/** 协议受益分配（正为受益，-100~100） */
+export interface ProtocolBeneficiary {
+  US: number
+  UK: number
+  SU: number
+}
+
+/** 单条协议 */
+export interface Protocol {
+  id: string
+  topic: ProtocolTopic
+  title: string
+  /** 激进度 0~100 */
+  radicalness: number
+  /** 受益分配 */
+  beneficiary: ProtocolBeneficiary
+  /** 签署方 */
+  signatories: Nation[]
+  /** 已同意签署方 */
+  agreed: Nation[]
+  /** 提案国 */
+  proposedBy: Nation
+  /** 会场一保密 → 无指标变化 */
+  secret: boolean
+  status: 'PROPOSED' | 'SIGNED' | 'REJECTED'
+  /** 提案所在会期 */
+  proposedSession: number
+  /** 签署所在会期 */
+  signedSession?: number
+}
+
+/** 协议草案（客户端提交内容） */
+export interface ProtocolDraft {
+  topic: ProtocolTopic
+  title: string
+  radicalness: number
+  beneficiary: ProtocolBeneficiary
+  signatories: Nation[]
+  secret: boolean
+}
+
+// ========== 胜负结算（rules.md §6） ==========
+
+/** 单国胜利分明细 */
+export interface NationVictoryScore {
+  nation: Nation
+  victoryScore: number
+  /** 已达成战略目标文案 */
+  achievedGoals: string[]
+  /** 有利条约数 */
+  favorableTreaties: number
+  breakdown: {
+    publicSupport: number
+    oppositionPressure: number
+    colonyUnrest: number
+    achievedGoals: number
+    favorableTreaties: number
+    penalties: number
+  }
+}
+
+/** 结算结果 */
+export interface VictoryResult {
+  scores: Record<Nation, NationVictoryScore>
+  /** 胜者：国家 | 'SHARED'(完美雅尔塔) | 'ALL_LOSE'(三战) | 'DRAW' */
+  outcome: Nation | 'SHARED' | 'ALL_LOSE' | 'DRAW'
+  endingTitle: string
+  endingText: string
+  /** 触发的特殊结局文案 */
+  specialEndings: string[]
 }
 
 /** 引擎事件类型 */
@@ -319,6 +407,12 @@ export interface GameState {
   ukElection: UKElectionState
   /** 抗议信系统 */
   petitions: PetitionState
+  /** 协议系统（rules.md §4） */
+  protocols: Protocol[]
+  /** 已达成战略目标（协议派生，终局再并入终局状态目标） */
+  achievedGoals: Record<Nation, string[]>
+  /** 结算结果（第 7 会期闭幕时计算，非空即游戏结束） */
+  settlement: VictoryResult | null
   /** 累计事件（事件溯源） */
   events: GameEvent[]
   /** 可读日志 */

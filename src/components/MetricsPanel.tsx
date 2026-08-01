@@ -9,6 +9,12 @@ const NATION_LABEL: Record<Nation, string> = { US: '美利坚合众国', UK: '�
 const NATION_LEADER: Record<Nation, string> = { US: '罗斯福总统', UK: '丘吉尔首相', SU: '斯大林元帅' }
 const NATION_COLOR: Record<Nation, string> = { US: '#3a6ea5', UK: '#8b2c2c', SU: '#a83232' }
 
+const NATION_FLAG: Record<Nation, string> = {
+  US: '/photos/Flag_of_the_United_States_(1912-1959).svg',
+  UK: '/photos/Flag_of_the_United_Kingdom.svg',
+  SU: '/photos/Flag_of_the_Soviet_Union.svg',
+}
+
 const STATUS_TONE: Record<RooseveltStatus, string> = {
   STABLE: '#3a6b3a',
   DECLINING: '#a8732c',
@@ -82,9 +88,12 @@ export function MetricsPanel() {
       <div className="delegations">
         {(['US', 'UK', 'SU'] as Nation[]).map((n) => (
           <div key={n} className="delegation-card" style={{ borderColor: NATION_COLOR[n] }}>
-            <div className="delegation-header" style={{ background: NATION_COLOR[n] }}>
-              <span className="delegation-name">{NATION_LABEL[n]}</span>
-              <span className="delegation-leader">{NATION_LEADER[n]}</span>
+            <div className="delegation-header" style={{ borderLeft: `3px solid ${NATION_COLOR[n]}` }}>
+              <img className="delegation-flag" src={NATION_FLAG[n]} alt={NATION_LABEL[n]} />
+              <div className="delegation-header-text">
+                <span className="delegation-name">{NATION_LABEL[n]}</span>
+                <span className="delegation-leader">{NATION_LEADER[n]}</span>
+              </div>
             </div>
             <div className="delegation-body">
               <MetricRow label="民望" value={state.metrics[n].publicSupport} />

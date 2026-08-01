@@ -3,5 +3,7 @@ dist-ssr
 *.local
 .vite
 
-# 后端构建产物（服务器上重新 npm run build）
+# 构建产物（服务器上重新 npm run build / npm run build:server）
+dist
 server/dist
+server-dist

@@ -2,7 +2,7 @@
 // 前后端共用，避免类型漂移
 // 混合制角色：3 队长（三巨头）+ N 幕僚（专项席位）+ 旁观者
 
-import type { MilitaryOrder, WiretapOrder, Nation, SessionPhase } from './domain/types'
+import type { MilitaryOrder, WiretapOrder, Nation, SessionPhase, ProtocolDraft, Protocol, VictoryResult } from './domain/types'
 
 // ========== 角色 ==========
 
@@ -54,6 +54,8 @@ export type GameAction =
   | { kind: 'POLAND_RESPONSE'; response: 'SUPPRESS' | 'ALLOW' | 'SUPPORT' }
   | { kind: 'POLAND_RESOLVE' }
   | { kind: 'PETITION_HANDLE'; petitionId: string; handling: 'RESPOND' | 'ARCHIVE' | 'REJECT' }
+  | { kind: 'PROPOSE_PROTOCOL'; draft: ProtocolDraft; proposedBy: Nation }
+  | { kind: 'SIGN_PROTOCOL'; protocolId: string; nation: Nation }
 
 // ========== 服务器 → 客户端 ==========
 
@@ -95,6 +97,12 @@ export interface SerializableGameState {
   polandUprising: { status: string; phase: string; polandDiscussedSessions: number; outbreakResponse?: string; westernIntervened: boolean; sovietConceded: boolean; resolution?: string }
   ukElection: { status: string; countdown: number; laborPolling: number; hawkishActions: number; softActions: number; churchillRetired: boolean; churchillAway: boolean }
   petitions: { pending: any[]; historyCount: number; consecutiveColonyIgnored: number; colonyUprisingTriggered: boolean }
+  /** 协议系统（rules.md §4） */
+  protocols: Protocol[]
+  /** 已达成战略目标（协议派生） */
+  achievedGoals: Record<Nation, string[]>
+  /** 结算结果（非空即游戏结束） */
+  settlement: VictoryResult | null
   logs: LogEntryDTO[]
   gameEnded: boolean
 }
