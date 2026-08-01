@@ -3,7 +3,10 @@ dist-ssr
 *.local
 .vite
 
-# 构建产物（服务器上重新 npm run build / npm run build:server）
-dist
-server/dist
-server-dist
+# 构建产物改为「提交进 git」：
+# 在本地（现代 glibc 环境）执行 npm run build / npm run build:server，
+# 把 dist/ 与 server-dist/ 一起提交，服务器直接 git pull 拉取运行，
+# 避免老系统 glibc 过低（< 2.33）导致 vite/rollup 原生模块加载失败。
+# 若以后想恢复服务器构建，把下面两行注释去掉即可。
+# dist
+# server-dist

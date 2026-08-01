@@ -7,9 +7,12 @@
 #
 # 前置条件：
 #   1. 项目已 git clone 到 PROJECT_DIR
-#   2. 已安装 node / npm（宝塔「Node 项目」或自行安装均可，npm run 能跑即可）
-#   3. 已按说明在宝塔添加 /ws 反向代理（见脚本底部说明）
-#   4. 已放置 deploy/yalta-ws.service 到 /etc/systemd/system/ 并 enable
+#   2. 已安装 node / npm（仅用于跑运行时依赖 ws，无需构建工具）
+#   3. 已在本地执行 npm run build / npm run build:server，并把 dist/ 与
+#      server-dist/ 提交进 git（服务器直接 git pull 拉取，不在服务器构建，
+#      以免老系统 glibc 过低导致 vite/rollup 原生模块加载失败）
+#   4. 已按说明在宝塔添加 /ws 反向代理（见脚本底部说明）
+#   5. 已放置 deploy/yalta-ws.service 到 /etc/systemd/system/ 并 enable
 #
 set -euo pipefail
 
@@ -41,20 +44,18 @@ git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
 log "拉取最新代码"
 git pull || { err "git pull 失败（可能有本地未提交改动）"; exit 1; }
 
-# 2) 安装依赖（ws 运行时依赖 + 构建所需的 typescript/vite/esbuild）
-log "安装依赖 (npm install)"
-npm install || { err "npm install 失败"; exit 1; }
+# 2) 仅安装运行时依赖（ws 等，纯 JS，不碰 vite/rollup 原生模块，避免老 glibc 报错）
+#    构建产物 dist/ 与 server-dist/ 已在本地构建并提交进 git，直接随 git pull 拉取。
+log "安装运行时依赖 (npm install --omit=dev)"
+npm install --omit=dev || { err "npm install 失败"; exit 1; }
 
-# 3) 构建前端 → dist/
-log "构建前端 (npm run build)"
-npm run build || { err "前端构建失败"; exit 1; }
-
-# 4) 构建后端 → server-dist/index.cjs
-log "构建后端 (npm run build:server)"
-npm run build:server || { err "后端构建失败"; exit 1; }
-
+# 3) 校验前端 / 后端产物（应已由 git 拉取）
+if [ ! -f "dist/index.html" ]; then
+  err "前端产物缺失：dist/index.html（请确认本地已 npm run build 并 git push）"
+  exit 1
+fi
 if [ ! -f "server-dist/index.cjs" ]; then
-  err "后端产物缺失：server-dist/index.cjs"
+  err "后端产物缺失：server-dist/index.cjs（请确认本地已 npm run build:server 并 git push）"
   exit 1
 fi
 
