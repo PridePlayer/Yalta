@@ -27,6 +27,7 @@ var import_ws = require("ws");
 var import_crypto = require("crypto");
 var fs = __toESM(require("fs"));
 var path = __toESM(require("path"));
+var http = __toESM(require("http"));
 
 // shared/engine/random.ts
 function createRng(seed) {
@@ -1022,7 +1023,7 @@ var GameServer = class {
   }
   doMilitaryOrder(order) {
     const seat = SEATS.find((s) => s.id === order.seatId);
-    if (!seat || seat.role !== "MILITARY") {
+    if (!seat || seat.role !== "MILITARY" || seat.nation !== order.nation) {
       return { success: false, message: `${order.seatId} \u65E0\u519B\u4E8B\u6307\u6325\u6743`, newLogs: [] };
     }
     const commanderSkill = seat.commanderSkill ?? 5;
@@ -1042,7 +1043,7 @@ var GameServer = class {
   }
   doWiretap(order) {
     const seat = SEATS.find((s) => s.id === order.seatId);
-    if (!seat || seat.role !== "INTEL") {
+    if (!seat || seat.role !== "INTEL" || seat.nation !== order.nation) {
       return { success: false, message: `${order.seatId} \u65E0\u60C5\u62A5\u804C\u6743`, newLogs: [] };
     }
     const intelSkill = seat.intelSkill ?? 5;
@@ -1312,9 +1313,12 @@ function canPerformAction(role, action, currentPhase) {
       if (action.order.nation !== nation) {
         return { allowed: false, reason: "\u65E0\u6743\u6307\u6325\u4ED6\u56FD\u519B\u961F" };
       }
+      const seat = SEATS.find((s) => s.id === action.order.seatId);
+      if (!seat || seat.nation !== nation) {
+        return { allowed: false, reason: "\u53EA\u80FD\u6307\u6325\u672C\u56FD\u519B\u4E8B\u5E2D\u4F4D" };
+      }
       if (isSupport(role)) {
-        const seat = SEATS.find((s) => s.id === role.seatId);
-        if (!seat || seat.role !== "MILITARY") {
+        if (seat.role !== "MILITARY") {
           return { allowed: false, reason: "\u5E55\u50DA\u4EC5\u53EF\u6267\u884C\u672C\u804C\u52A8\u4F5C" };
         }
         if (action.order.seatId !== role.seatId) {
@@ -1327,11 +1331,11 @@ function canPerformAction(role, action, currentPhase) {
       if (action.order.nation !== nation) {
         return { allowed: false, reason: "\u65E0\u6743\u8C03\u5EA6\u4ED6\u56FD\u60C5\u62A5\u5B98" };
       }
+      const seat = SEATS.find((s) => s.id === action.order.seatId);
+      if (!seat || seat.nation !== nation || seat.role !== "INTEL") {
+        return { allowed: false, reason: "\u53EA\u80FD\u8C03\u5EA6\u672C\u56FD\u60C5\u62A5\u5E2D\u4F4D" };
+      }
       if (isSupport(role)) {
-        const seat = SEATS.find((s) => s.id === role.seatId);
-        if (!seat || seat.role !== "INTEL") {
-          return { allowed: false, reason: "\u5E55\u50DA\u4EC5\u53EF\u6267\u884C\u672C\u804C\u52A8\u4F5C" };
-        }
         if (action.order.seatId !== role.seatId) {
           return { allowed: false, reason: "\u5E55\u50DA\u4EC5\u53EF\u4EE3\u8868\u672C\u4EBA\u5E2D\u4F4D\u884C\u52A8" };
         }
@@ -1870,7 +1874,13 @@ function handleDisconnect(ws) {
     }
   }, 3e4);
 }
-var wss = new import_ws.WebSocketServer({ port: PORT, host: "127.0.0.1", path: "/ws", maxPayload: MAX_PAYLOAD });
+var httpServer = http.createServer((req, res) => {
+  handleAdminRequest(req, res);
+});
+var wss = new import_ws.WebSocketServer({ server: httpServer, path: "/ws", maxPayload: MAX_PAYLOAD });
+httpServer.listen(PORT, "127.0.0.1", () => {
+  console.log(`Yalta server (ws + admin) listening on 127.0.0.1:${PORT}`);
+});
 var heartbeat = setInterval(() => {
   wss.clients.forEach((client) => {
     const c = client;
@@ -1893,6 +1903,173 @@ var announcementPoller = setInterval(() => {
   }
 }, ANNOUNCEMENT_POLL_MS);
 announcementPoller.unref?.();
+var ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+if (!ADMIN_TOKEN) {
+  console.log("[\u8B66\u544A] ADMIN_TOKEN \u672A\u8BBE\u7F6E\uFF0C\u540E\u53F0\u7BA1\u7406\u63A5\u53E3\u53EF\u88AB\u4EFB\u610F\u8BBF\u95EE\uFF0C\u8BF7\u5728\u751F\u4EA7\u73AF\u5883\u8BBE\u7F6E ADMIN_TOKEN");
+}
+function adminAuthorized(reqUrl) {
+  if (!ADMIN_TOKEN) return true;
+  return reqUrl.searchParams.get("token") === ADMIN_TOKEN;
+}
+function sendJson(res, code, obj) {
+  res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(obj));
+}
+function closeRoomByCode(code) {
+  const room = rooms.get(code);
+  if (!room) return { ok: false, message: "\u623F\u95F4\u4E0D\u5B58\u5728" };
+  for (const [, conn] of room.players) {
+    try {
+      conn.ws.terminate();
+    } catch {
+    }
+  }
+  rooms.delete(code);
+  console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] admin closed room ${code}`);
+  return { ok: true, message: `\u623F\u95F4 ${code} \u5DF2\u5173\u95ED` };
+}
+function roomsSnapshot() {
+  return {
+    count: rooms.size,
+    totalConnections: wss.clients.size,
+    uptimeSeconds: Math.floor(process.uptime()),
+    rooms: [...rooms.values()].map((r) => ({
+      code: r.code,
+      players: r.players.size,
+      started: r.started,
+      session: r.game.state.session,
+      phase: r.game.state.phase
+    }))
+  };
+}
+function handleAdminRequest(req, res) {
+  const reqUrl = new URL(req.url || "/", `http://${req.headers.host}`);
+  const pathname = reqUrl.pathname;
+  if (pathname === "/admin") {
+    if (!adminAuthorized(reqUrl)) {
+      res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("\u672A\u6388\u6743\uFF1A\u7F3A\u5C11\u6216\u9519\u8BEF\u7684 token");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(buildAdminHtml());
+    return;
+  }
+  if (pathname.startsWith("/api/admin/")) {
+    if (!adminAuthorized(reqUrl)) {
+      sendJson(res, 401, { ok: false, message: "\u672A\u6388\u6743" });
+      return;
+    }
+    if (pathname === "/api/admin/rooms" && req.method === "GET") {
+      sendJson(res, 200, roomsSnapshot());
+      return;
+    }
+    const closeMatch = pathname.match(/^\/api\/admin\/rooms\/([^/]+)\/close$/);
+    if (closeMatch && (req.method === "POST" || req.method === "GET")) {
+      const code = decodeURIComponent(closeMatch[1]);
+      sendJson(res, 200, closeRoomByCode(code));
+      return;
+    }
+    if (pathname === "/api/admin/close-all" && req.method === "POST") {
+      const codes = [...rooms.keys()];
+      for (const code of codes) closeRoomByCode(code);
+      sendJson(res, 200, { ok: true, message: `\u5DF2\u5173\u95ED ${codes.length} \u4E2A\u623F\u95F4` });
+      return;
+    }
+    sendJson(res, 404, { ok: false, message: "\u672A\u77E5\u63A5\u53E3" });
+    return;
+  }
+  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end("Not Found");
+}
+function buildAdminHtml() {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>\u96C5\u5C14\u5854 \xB7 \u540E\u53F0\u7BA1\u7406</title>
+<style>
+  :root { --bg:#15110f; --panel:#1f1916; --crimson:#9b2c2c; --gold:#d9b46a; --ink:#ece3d4; --muted:#9a8f80; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { font-size:22px; border-left:4px solid var(--crimson); padding-left:12px; margin:8px 0 20px; }
+  .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:18px; }
+  .card { flex:1 1 160px; background:var(--panel); border:1px solid #322720; border-radius:10px; padding:16px; text-align:center; }
+  .card .num { font-size:30px; font-weight:700; color:var(--gold); }
+  .card .lbl { font-size:13px; color:var(--muted); margin-top:4px; }
+  .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  button { background:var(--crimson); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:14px; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  button.danger { background:#7a1f1f; }
+  .msg { color:var(--gold); font-size:13px; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border-radius:10px; overflow:hidden; }
+  th,td { padding:11px 12px; text-align:left; border-bottom:1px solid #2c241d; font-size:14px; }
+  th { background:#261e19; color:var(--muted); font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  .empty { text-align:center; color:var(--muted); padding:26px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; background:#2c241d; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>\u96C5\u5C14\u5854\u4F1A\u8BAE \xB7 \u540E\u53F0\u7BA1\u7406</h1>
+  <div class="cards" id="cards"></div>
+  <div class="toolbar">
+    <button id="refresh">\u5237\u65B0</button>
+    <button id="closeAll" class="danger">\u5173\u95ED\u5168\u90E8\u623F\u95F4</button>
+    <span class="msg" id="msg"></span>
+  </div>
+  <table>
+    <thead><tr><th>\u623F\u95F4\u7801</th><th>\u4EBA\u6570</th><th>\u5DF2\u5F00\u59CB</th><th>\u4F1A\u671F</th><th>\u9636\u6BB5</th><th>\u64CD\u4F5C</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script>
+  var token = new URLSearchParams(location.search).get('token') || '';
+  function getToken(){ return token ? ('?token=' + encodeURIComponent(token)) : ''; }
+  function showMsg(t){ document.getElementById('msg').textContent = t; }
+  function load(){
+    fetch('/api/admin/rooms' + getToken()).then(function(r){return r.json();}).then(function(d){ render(d); }).catch(function(e){ showMsg('\u52A0\u8F7D\u5931\u8D25: ' + e); });
+  }
+  function render(d){
+    document.getElementById('cards').innerHTML =
+      '<div class="card"><div class="num">' + d.count + '</div><div class="lbl">\u623F\u95F4\u6570</div></div>' +
+      '<div class="card"><div class="num">' + d.totalConnections + '</div><div class="lbl">\u603B\u8FDE\u63A5\u6570</div></div>' +
+      '<div class="card"><div class="num">' + d.uptimeSeconds + 's</div><div class="lbl">\u8FD0\u884C\u65F6\u957F</div></div>';
+    var rows = document.getElementById('rows');
+    rows.innerHTML = '';
+    if(!d.rooms.length){ rows.innerHTML = '<tr><td colspan="6" class="empty">\u5F53\u524D\u6CA1\u6709\u623F\u95F4</td></tr>'; return; }
+    d.rooms.forEach(function(r){
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td><b>' + r.code + '</b></td><td>' + r.players + '</td><td>' + (r.started?'<span class="tag">\u662F</span>':'\u5426') + '</td><td>' + r.session + '</td><td>' + r.phase + '</td>';
+      var td = document.createElement('td');
+      var b = document.createElement('button');
+      b.className = 'danger';
+      b.textContent = '\u5173\u95ED';
+      b.onclick = function(){ closeRoom(r.code); };
+      td.appendChild(b);
+      tr.appendChild(td);
+      rows.appendChild(tr);
+    });
+  }
+  function closeRoom(code){
+    if(!confirm('\u786E\u5B9A\u5173\u95ED\u623F\u95F4 ' + code + '\uFF1F\u8BE5\u623F\u95F4\u6240\u6709\u73A9\u5BB6\u5C06\u88AB\u7ACB\u5373\u65AD\u5F00\u3002')) return;
+    fetch('/api/admin/rooms/' + encodeURIComponent(code) + '/close' + getToken(), {method:'POST'}).then(function(r){return r.json();}).then(function(d){ showMsg(d.message || (d.ok?'\u5DF2\u5173\u95ED':'\u64CD\u4F5C\u5931\u8D25')); load(); });
+  }
+  function closeAll(){
+    if(!confirm('\u786E\u5B9A\u5173\u95ED\u6240\u6709\u623F\u95F4\uFF1F\u6240\u6709\u73A9\u5BB6\u5C06\u88AB\u7ACB\u5373\u65AD\u5F00\u3002')) return;
+    fetch('/api/admin/close-all' + getToken(), {method:'POST'}).then(function(r){return r.json();}).then(function(d){ showMsg(d.message || ''); load(); });
+  }
+  document.getElementById('refresh').onclick = load;
+  document.getElementById('closeAll').onclick = closeAll;
+  load();
+  setInterval(load, 3000);
+</script>
+</body>
+</html>`;
+}
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let roomCode = url.searchParams.get("room") || "";
@@ -1920,4 +2097,3 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => handleDisconnect(ws));
   console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] ${playerName} (${clientId}) joined room ${roomCode} (${room.players.size} players)`);
 });
-console.log(`Yalta WebSocket server on :${PORT}/ws`);

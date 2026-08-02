@@ -5,6 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { randomBytes } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
+import * as http from 'http'
 import { GameServer } from './gameServer'
 import { canPerformAction, canAdvancePhase, canReset } from './permissions'
 import { runAIPlayers, resetAIActed } from './aiPlayer'
@@ -338,7 +339,13 @@ function handleDisconnect(ws: WebSocket): void {
   }, 30000)
 }
 
-const wss = new WebSocketServer({ port: PORT, host: '127.0.0.1', path: '/ws', maxPayload: MAX_PAYLOAD })
+// 创建 HTTP 服务器承载「后台管理」接口，并将 WebSocketServer 挂载其上（同端口，由 nginx 反代）
+// 这样 /ws 仍走 WebSocket，/admin 与 /api/admin/* 走普通 HTTP，互不干扰。
+const httpServer = http.createServer((req, res) => { handleAdminRequest(req, res) })
+const wss = new WebSocketServer({ server: httpServer, path: '/ws', maxPayload: MAX_PAYLOAD })
+httpServer.listen(PORT, '127.0.0.1', () => {
+  console.log(`Yalta server (ws + admin) listening on 127.0.0.1:${PORT}`)
+})
 
 // 心跳：定期探测死连接，触发 close 以正常清理房间/玩家（避免静默断开导致泄漏）
 const heartbeat = setInterval(() => {
@@ -366,6 +373,185 @@ const announcementPoller = setInterval(() => {
   }
 }, ANNOUNCEMENT_POLL_MS)
 ;(announcementPoller as any).unref?.()
+
+// ========== 后台管理接口 ==========
+// 仅由 nginx 反代访问（127.0.0.1:PORT）。可选 ADMIN_TOKEN 做简易鉴权：
+// 配置后，访问 /admin 与 /api/admin/* 需带 ?token=xxx（管理页会自动沿用 URL 上的 token）。
+// 若未设置 ADMIN_TOKEN，接口可被任意访问——生产环境务必在 systemd 的 Environment 中设置。
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || ''
+if (!ADMIN_TOKEN) {
+  console.log('[警告] ADMIN_TOKEN 未设置，后台管理接口可被任意访问，请在生产环境设置 ADMIN_TOKEN')
+}
+
+function adminAuthorized(reqUrl: URL): boolean {
+  if (!ADMIN_TOKEN) return true
+  return reqUrl.searchParams.get('token') === ADMIN_TOKEN
+}
+
+function sendJson(res: http.ServerResponse, code: number, obj: unknown): void {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify(obj))
+}
+
+/** 关闭指定房间：断开其所有连接并释放内存 */
+function closeRoomByCode(code: string): { ok: boolean; message: string } {
+  const room = rooms.get(code)
+  if (!room) return { ok: false, message: '房间不存在' }
+  for (const [, conn] of room.players) {
+    try { conn.ws.terminate() } catch { /* 忽略已关闭的连接 */ }
+  }
+  rooms.delete(code)
+  console.log(`[${new Date().toISOString()}] admin closed room ${code}`)
+  return { ok: true, message: `房间 ${code} 已关闭` }
+}
+
+function roomsSnapshot() {
+  return {
+    count: rooms.size,
+    totalConnections: wss.clients.size,
+    uptimeSeconds: Math.floor(process.uptime()),
+    rooms: [...rooms.values()].map((r) => ({
+      code: r.code,
+      players: r.players.size,
+      started: r.started,
+      session: r.game.state.session,
+      phase: r.game.state.phase,
+    })),
+  }
+}
+
+function handleAdminRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const reqUrl = new URL(req.url || '/', `http://${req.headers.host}`)
+  const pathname = reqUrl.pathname
+
+  if (pathname === '/admin') {
+    if (!adminAuthorized(reqUrl)) {
+      res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end('未授权：缺少或错误的 token')
+      return
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(buildAdminHtml())
+    return
+  }
+
+  if (pathname.startsWith('/api/admin/')) {
+    if (!adminAuthorized(reqUrl)) {
+      sendJson(res, 401, { ok: false, message: '未授权' })
+      return
+    }
+    if (pathname === '/api/admin/rooms' && req.method === 'GET') {
+      sendJson(res, 200, roomsSnapshot())
+      return
+    }
+    const closeMatch = pathname.match(/^\/api\/admin\/rooms\/([^/]+)\/close$/)
+    if (closeMatch && (req.method === 'POST' || req.method === 'GET')) {
+      const code = decodeURIComponent(closeMatch[1])
+      sendJson(res, 200, closeRoomByCode(code))
+      return
+    }
+    if (pathname === '/api/admin/close-all' && req.method === 'POST') {
+      const codes = [...rooms.keys()]
+      for (const code of codes) closeRoomByCode(code)
+      sendJson(res, 200, { ok: true, message: `已关闭 ${codes.length} 个房间` })
+      return
+    }
+    sendJson(res, 404, { ok: false, message: '未知接口' })
+    return
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+  res.end('Not Found')
+}
+
+function buildAdminHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>雅尔塔 · 后台管理</title>
+<style>
+  :root { --bg:#15110f; --panel:#1f1916; --crimson:#9b2c2c; --gold:#d9b46a; --ink:#ece3d4; --muted:#9a8f80; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { font-size:22px; border-left:4px solid var(--crimson); padding-left:12px; margin:8px 0 20px; }
+  .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:18px; }
+  .card { flex:1 1 160px; background:var(--panel); border:1px solid #322720; border-radius:10px; padding:16px; text-align:center; }
+  .card .num { font-size:30px; font-weight:700; color:var(--gold); }
+  .card .lbl { font-size:13px; color:var(--muted); margin-top:4px; }
+  .toolbar { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  button { background:var(--crimson); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:14px; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  button.danger { background:#7a1f1f; }
+  .msg { color:var(--gold); font-size:13px; }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border-radius:10px; overflow:hidden; }
+  th,td { padding:11px 12px; text-align:left; border-bottom:1px solid #2c241d; font-size:14px; }
+  th { background:#261e19; color:var(--muted); font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  .empty { text-align:center; color:var(--muted); padding:26px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; background:#2c241d; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>雅尔塔会议 · 后台管理</h1>
+  <div class="cards" id="cards"></div>
+  <div class="toolbar">
+    <button id="refresh">刷新</button>
+    <button id="closeAll" class="danger">关闭全部房间</button>
+    <span class="msg" id="msg"></span>
+  </div>
+  <table>
+    <thead><tr><th>房间码</th><th>人数</th><th>已开始</th><th>会期</th><th>阶段</th><th>操作</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script>
+  var token = new URLSearchParams(location.search).get('token') || '';
+  function getToken(){ return token ? ('?token=' + encodeURIComponent(token)) : ''; }
+  function showMsg(t){ document.getElementById('msg').textContent = t; }
+  function load(){
+    fetch('/api/admin/rooms' + getToken()).then(function(r){return r.json();}).then(function(d){ render(d); }).catch(function(e){ showMsg('加载失败: ' + e); });
+  }
+  function render(d){
+    document.getElementById('cards').innerHTML =
+      '<div class="card"><div class="num">' + d.count + '</div><div class="lbl">房间数</div></div>' +
+      '<div class="card"><div class="num">' + d.totalConnections + '</div><div class="lbl">总连接数</div></div>' +
+      '<div class="card"><div class="num">' + d.uptimeSeconds + 's</div><div class="lbl">运行时长</div></div>';
+    var rows = document.getElementById('rows');
+    rows.innerHTML = '';
+    if(!d.rooms.length){ rows.innerHTML = '<tr><td colspan="6" class="empty">当前没有房间</td></tr>'; return; }
+    d.rooms.forEach(function(r){
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td><b>' + r.code + '</b></td><td>' + r.players + '</td><td>' + (r.started?'<span class="tag">是</span>':'否') + '</td><td>' + r.session + '</td><td>' + r.phase + '</td>';
+      var td = document.createElement('td');
+      var b = document.createElement('button');
+      b.className = 'danger';
+      b.textContent = '关闭';
+      b.onclick = function(){ closeRoom(r.code); };
+      td.appendChild(b);
+      tr.appendChild(td);
+      rows.appendChild(tr);
+    });
+  }
+  function closeRoom(code){
+    if(!confirm('确定关闭房间 ' + code + '？该房间所有玩家将被立即断开。')) return;
+    fetch('/api/admin/rooms/' + encodeURIComponent(code) + '/close' + getToken(), {method:'POST'}).then(function(r){return r.json();}).then(function(d){ showMsg(d.message || (d.ok?'已关闭':'操作失败')); load(); });
+  }
+  function closeAll(){
+    if(!confirm('确定关闭所有房间？所有玩家将被立即断开。')) return;
+    fetch('/api/admin/close-all' + getToken(), {method:'POST'}).then(function(r){return r.json();}).then(function(d){ showMsg(d.message || ''); load(); });
+  }
+  document.getElementById('refresh').onclick = load;
+  document.getElementById('closeAll').onclick = closeAll;
+  load();
+  setInterval(load, 3000);
+</script>
+</body>
+</html>`
+}
 
 wss.on('connection', (ws, req) => {
   // 从 URL 提取房间码、玩家名与设备标识：/ws?room=XXXX&name=YYY&cid=ZZZ
@@ -401,5 +587,3 @@ wss.on('connection', (ws, req) => {
 
   console.log(`[${new Date().toISOString()}] ${playerName} (${clientId}) joined room ${roomCode} (${room.players.size} players)`)
 })
-
-console.log(`Yalta WebSocket server on :${PORT}/ws`)

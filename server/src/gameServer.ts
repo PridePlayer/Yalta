@@ -137,7 +137,7 @@ export class GameServer {
 
   private doMilitaryOrder(order: MilitaryOrder): ActionResult {
     const seat = SEATS.find((s) => s.id === order.seatId)
-    if (!seat || seat.role !== 'MILITARY') {
+    if (!seat || seat.role !== 'MILITARY' || seat.nation !== order.nation) {
       return { success: false, message: `${order.seatId} 无军事指挥权`, newLogs: [] }
     }
     const commanderSkill = seat.commanderSkill ?? 5
@@ -161,7 +161,7 @@ export class GameServer {
 
   private doWiretap(order: WiretapOrder): ActionResult {
     const seat = SEATS.find((s) => s.id === order.seatId)
-    if (!seat || seat.role !== 'INTEL') {
+    if (!seat || seat.role !== 'INTEL' || seat.nation !== order.nation) {
       return { success: false, message: `${order.seatId} 无情报职权`, newLogs: [] }
     }
     const intelSkill = seat.intelSkill ?? 5

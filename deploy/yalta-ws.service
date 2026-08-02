@@ -19,6 +19,9 @@ Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
 Environment=PORT=8080
+# 后台管理接口（/admin 与 /api/admin/*）鉴权 token。留空表示不鉴权（可被任意访问，生产务必设置）。
+# 设置后，访问后台需带 ?token=此处的值，例如 https://yalta.stellamp.me/admin?token=你的令牌
+Environment=ADMIN_TOKEN=
 
 [Install]
 WantedBy=multi-user.target

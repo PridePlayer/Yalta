@@ -25,10 +25,14 @@ export function canPerformAction(role: PlayerRole, action: GameAction, currentPh
       if (action.order.nation !== nation) {
         return { allowed: false, reason: '无权指挥他国军队' }
       }
-      // 幕僚：必须是该席位的军事官
+      // 席位必须真实存在、且归属于本国：防止以本国名义指挥他国军事席位
+      const seat = SEATS.find((s) => s.id === action.order.seatId)
+      if (!seat || seat.nation !== nation) {
+        return { allowed: false, reason: '只能指挥本国军事席位' }
+      }
+      // 幕僚：必须是该席位的军事官，且仅可代表本人席位行动
       if (isSupport(role)) {
-        const seat = SEATS.find((s) => s.id === role.seatId)
-        if (!seat || seat.role !== 'MILITARY') {
+        if (seat.role !== 'MILITARY') {
           return { allowed: false, reason: '幕僚仅可执行本职动作' }
         }
         if (action.order.seatId !== role.seatId) {
@@ -43,11 +47,13 @@ export function canPerformAction(role: PlayerRole, action: GameAction, currentPh
       if (action.order.nation !== nation) {
         return { allowed: false, reason: '无权调度他国情报官' }
       }
+      // 席位必须真实存在、归属于本国、且为情报官：防止以本国名义调度他国情报官
+      const seat = SEATS.find((s) => s.id === action.order.seatId)
+      if (!seat || seat.nation !== nation || seat.role !== 'INTEL') {
+        return { allowed: false, reason: '只能调度本国情报席位' }
+      }
+      // 幕僚：仅可代表本人席位行动
       if (isSupport(role)) {
-        const seat = SEATS.find((s) => s.id === role.seatId)
-        if (!seat || seat.role !== 'INTEL') {
-          return { allowed: false, reason: '幕僚仅可执行本职动作' }
-        }
         if (action.order.seatId !== role.seatId) {
           return { allowed: false, reason: '幕僚仅可代表本人席位行动' }
         }
