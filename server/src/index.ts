@@ -3,6 +3,8 @@
 
 import { WebSocketServer, WebSocket } from 'ws'
 import { randomBytes } from 'crypto'
+import * as fs from 'fs'
+import * as path from 'path'
 import { GameServer } from './gameServer'
 import { canPerformAction, canAdvancePhase, canReset } from './permissions'
 import { runAIPlayers, resetAIActed } from './aiPlayer'
@@ -19,6 +21,12 @@ const MAX_PAYLOAD = Number(process.env.MAX_PAYLOAD) || 1 * 1024 * 1024
 const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS) || 30000
 // 单连接动作最小间隔（毫秒），防止单个客户端刷广播（广播放大）
 const MIN_ACTION_INTERVAL_MS = Number(process.env.MIN_ACTION_INTERVAL_MS) || 150
+// 全服公告文件路径：服务器后台可直接编辑，保存后最多数秒全员可见。
+// 该文件位于项目根目录 data/ 下，已被 .gitignore 忽略，因此 deploy 的 git pull
+// 不会覆盖它，也不会被提交进仓库（属于服务器本地配置，区别于入库的 dist/）。
+const ANNOUNCEMENT_FILE = process.env.ANNOUNCEMENT_FILE || path.join(process.cwd(), 'data', 'announcement.txt')
+// 公告文件轮询间隔（毫秒）
+const ANNOUNCEMENT_POLL_MS = Number(process.env.ANNOUNCEMENT_POLL_MS) || 5000
 
 interface Room {
   code: string
@@ -87,6 +95,28 @@ function broadcastRoomInfo(room: Room): void {
 
 function broadcastState(room: Room): void {
   broadcast(room, { type: 'STATE', state: room.game.serialize() })
+}
+
+// ========== 全服公告 ==========
+// 公告为服务器本地配置（data/announcement.txt），对所有在线连接广播，与房间无关。
+let currentAnnouncement = ''
+
+function loadAnnouncementFile(): string {
+  try {
+    return fs.readFileSync(ANNOUNCEMENT_FILE, 'utf8').trim()
+  } catch {
+    // 文件不存在或无法读取 → 视为无公告
+    return ''
+  }
+}
+
+/** 向所有在线连接广播（用于全服公告，跨房间） */
+function broadcastToAll(msg: ServerMessage): void {
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(msg))
+    }
+  })
 }
 
 /** 触发 AI 玩家行动（单人模式） */
@@ -325,6 +355,18 @@ const heartbeat = setInterval(() => {
 // 心跳定时器不应阻止进程退出
 ;(heartbeat as any).unref?.()
 
+// 全服公告：轮询文件，内容变化即向所有在线连接广播（最多延迟一个轮询周期）
+currentAnnouncement = loadAnnouncementFile()
+const announcementPoller = setInterval(() => {
+  const next = loadAnnouncementFile()
+  if (next !== currentAnnouncement) {
+    currentAnnouncement = next
+    broadcastToAll({ type: 'ANNOUNCEMENT', text: currentAnnouncement })
+    console.log(`[${new Date().toISOString()}] announcement updated (len=${currentAnnouncement.length})`)
+  }
+}, ANNOUNCEMENT_POLL_MS)
+;(announcementPoller as any).unref?.()
+
 wss.on('connection', (ws, req) => {
   // 从 URL 提取房间码、玩家名与设备标识：/ws?room=XXXX&name=YYY&cid=ZZZ
   const url = new URL(req.url!, `http://${req.headers.host}`)
@@ -348,6 +390,10 @@ wss.on('connection', (ws, req) => {
   // 若游戏已开始，发送当前状态
   if (room.started) {
     ws.send(JSON.stringify({ type: 'STATE', state: room.game.serialize() }))
+  }
+  // 下发当前全服公告（如有），确保新加入者也立即可见，清空后不发送（客户端默认隐藏）
+  if (currentAnnouncement) {
+    ws.send(JSON.stringify({ type: 'ANNOUNCEMENT', text: currentAnnouncement }))
   }
 
   ws.on('message', (data) => handleMessage(ws, data.toString()))

@@ -37,6 +37,9 @@ if [ ! -d "$PROJECT_DIR" ]; then
 fi
 cd "$PROJECT_DIR" || exit 1
 
+# 确保 data/ 目录存在（全服公告等服务器本地配置存放处，已被 .gitignore 忽略）
+mkdir -p "$PROJECT_DIR/data"
+
 # 0) 解决 git "dubious ownership"：root 运行时仓库属主非 root 会直接报错拦截
 git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
 

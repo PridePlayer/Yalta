@@ -66,6 +66,7 @@ export type ServerMessage =
   | { type: 'PRIVATE'; intel: PrivateIntel }
   | { type: 'ERROR'; message: string }
   | { type: 'ACTION_RESULT'; success: boolean; message: string }
+  | { type: 'ANNOUNCEMENT'; text: string }
 
 /** 私密情报（仅发送给窃听方及相关队长） */
 export interface PrivateIntel {

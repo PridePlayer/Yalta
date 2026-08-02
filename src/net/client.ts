@@ -28,6 +28,8 @@ interface ClientStore {
   intels: PrivateIntel[]
   /** 服务器推送的最新 ACTION_RESULT 反馈 */
   lastActionResult: { success: boolean; message: string; at: number } | null
+  /** 全服公告（服务器后台 data/announcement.txt 配置，所有玩家可见） */
+  announcement: string
 }
 
 let store: ClientStore = {
@@ -38,6 +40,7 @@ let store: ClientStore = {
   state: null,
   intels: [],
   lastActionResult: null,
+  announcement: '',
 }
 
 let ws: WebSocket | null = null
@@ -132,6 +135,10 @@ function handleMessage(raw: string) {
         // 失败的动作也清掉之前的 error（避免误导）
         error: msg.success ? store.error : msg.message,
       })
+      break
+    }
+    case 'ANNOUNCEMENT': {
+      setStore({ announcement: msg.text })
       break
     }
   }
@@ -278,6 +285,11 @@ export function usePrivateIntels(): PrivateIntel[] {
 
 export function useLastActionResult() {
   return useClientStore().lastActionResult
+}
+
+/** 全服公告文本（空字符串表示无公告） */
+export function useAnnouncement(): string {
+  return useClientStore().announcement
 }
 
 export type { ClientMessage, ServerMessage, RoomInfo, Player, PlayerRole, SerializableGameState, PrivateIntel, LogEntryDTO }

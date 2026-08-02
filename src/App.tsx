@@ -12,6 +12,7 @@ import { ProtocolPanel } from './components/ProtocolPanel'
 import { SettlementScreen } from './components/SettlementScreen'
 import { LogPanel } from './components/LogPanel'
 import { TopNewsTicker } from './components/TopNewsTicker'
+import ServerAnnouncement from './components/ServerAnnouncement'
 import { roleLabel } from '@shared/protocol'
 
 const SESSION_DATE = ['1945.02.04', '1945.02.05', '1945.02.06', '1945.02.07', '1945.02.08', '1945.02.09', '1945.02.10']
@@ -66,6 +67,9 @@ export default function App() {
     <div className="app">
       {/* 整页最顶部：最新电报「新闻字幕式」滚动通知 */}
       <TopNewsTicker />
+
+      {/* 全服公告：服务器后台配置，所有玩家在游戏中可见 */}
+      <ServerAnnouncement />
 
       {/* 顶部：会期 + 阶段流程指示器 */}
       <header className="masthead">

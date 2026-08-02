@@ -1,8 +1,32 @@
 "use strict";
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
 
 // server/src/index.ts
 var import_ws = require("ws");
 var import_crypto = require("crypto");
+var fs = __toESM(require("fs"));
+var path = __toESM(require("path"));
 
 // shared/engine/random.ts
 function createRng(seed) {
@@ -1591,6 +1615,8 @@ var ROOM_EMPTY_GRACE_MS = Number(process.env.ROOM_EMPTY_GRACE_MS) || 5 * 60 * 1e
 var MAX_PAYLOAD = Number(process.env.MAX_PAYLOAD) || 1 * 1024 * 1024;
 var HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS) || 3e4;
 var MIN_ACTION_INTERVAL_MS = Number(process.env.MIN_ACTION_INTERVAL_MS) || 150;
+var ANNOUNCEMENT_FILE = process.env.ANNOUNCEMENT_FILE || path.join(process.cwd(), "data", "announcement.txt");
+var ANNOUNCEMENT_POLL_MS = Number(process.env.ANNOUNCEMENT_POLL_MS) || 5e3;
 var rooms = /* @__PURE__ */ new Map();
 function genRoomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -1638,6 +1664,21 @@ function broadcastRoomInfo(room) {
 }
 function broadcastState(room) {
   broadcast(room, { type: "STATE", state: room.game.serialize() });
+}
+var currentAnnouncement = "";
+function loadAnnouncementFile() {
+  try {
+    return fs.readFileSync(ANNOUNCEMENT_FILE, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+function broadcastToAll(msg) {
+  wss.clients.forEach((client) => {
+    if (client.readyState === import_ws.WebSocket.OPEN) {
+      client.send(JSON.stringify(msg));
+    }
+  });
 }
 function triggerAI(room) {
   if (!room.singlePlayer || room.aiNations.length === 0) return;
@@ -1842,6 +1883,16 @@ var heartbeat = setInterval(() => {
   });
 }, HEARTBEAT_MS);
 heartbeat.unref?.();
+currentAnnouncement = loadAnnouncementFile();
+var announcementPoller = setInterval(() => {
+  const next = loadAnnouncementFile();
+  if (next !== currentAnnouncement) {
+    currentAnnouncement = next;
+    broadcastToAll({ type: "ANNOUNCEMENT", text: currentAnnouncement });
+    console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] announcement updated (len=${currentAnnouncement.length})`);
+  }
+}, ANNOUNCEMENT_POLL_MS);
+announcementPoller.unref?.();
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   let roomCode = url.searchParams.get("room") || "";
@@ -1861,6 +1912,9 @@ wss.on("connection", (ws, req) => {
   broadcastRoomInfo(room);
   if (room.started) {
     ws.send(JSON.stringify({ type: "STATE", state: room.game.serialize() }));
+  }
+  if (currentAnnouncement) {
+    ws.send(JSON.stringify({ type: "ANNOUNCEMENT", text: currentAnnouncement }));
   }
   ws.on("message", (data) => handleMessage(ws, data.toString()));
   ws.on("close", () => handleDisconnect(ws));
