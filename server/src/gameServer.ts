@@ -65,10 +65,13 @@ export class GameServer {
   private pendingIntel: PrivateIntel[] = []
   /** 日志自增序号，保证 id 唯一（即便日志被截断也不碰撞） */
   private logSeq = 0
+  /** 当前阶段开始时间戳（epoch ms），用于客户端同步倒计时 */
+  private phaseStartedAt = Date.now()
 
   constructor(seed: number = 20250204) {
     this.state = createInitialState(seed)
     this.state = this.generatePetitionsAtSessionStart()
+    this.phaseStartedAt = Date.now()
   }
 
   /** 序列化为客户端可见状态 */
@@ -77,6 +80,7 @@ export class GameServer {
     return {
       session: s.session,
       phase: s.phase,
+      phaseStartedAt: this.phaseStartedAt,
       metrics: s.metrics,
       intlOpinion: s.intlOpinion,
       rooseveltHealth: s.rooseveltHealth,
@@ -342,6 +346,7 @@ export class GameServer {
     if (idx < PHASE_ORDER.length - 1) {
       const to = PHASE_ORDER[idx + 1]
       this.state = { ...this.state, phase: to }
+      this.phaseStartedAt = Date.now()
       newLogs.push(this.appendLog(PHASE_NARRATIVE[to], 'info'))
     } else {
       if (this.state.session >= TOTAL_SESSIONS) {
@@ -359,6 +364,7 @@ export class GameServer {
       this.settleEventChainsAtSessionEnd(newLogs)
       const nextSession = this.state.session + 1
       this.state = { ...this.state, session: nextSession, phase: 'TOPIC', sovietJammerActive: false }
+      this.phaseStartedAt = Date.now()
       newLogs.push(this.appendLog(`—— ${SESSION_DATE[nextSession - 1]}，第 ${nextSession} 会期开始 ——`, 'info'))
       // 会期开始生成抗议信
       this.generatePetitionsAtSessionStart(newLogs)
@@ -431,5 +437,6 @@ export class GameServer {
   reset(seed: number): void {
     this.state = createInitialState(seed)
     this.state = this.generatePetitionsAtSessionStart()
+    this.phaseStartedAt = Date.now()
   }
 }

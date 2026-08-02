@@ -88,6 +88,8 @@ export interface PrivateIntel {
 export interface SerializableGameState {
   session: number
   phase: SessionPhase
+  /** 当前阶段开始的时间戳（epoch ms），用于客户端同步显示「本阶段剩余时间」倒计时 */
+  phaseStartedAt: number
   metrics: Record<Nation, { publicSupport: number; intelPoints: number; oppositionPressure: number; colonyUnrest: number }>
   intlOpinion: number
   rooseveltHealth: number

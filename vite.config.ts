@@ -57,4 +57,10 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    // 关闭自动清空输出目录：本地环境的安全删除钩子会拦截 Vite 的 emptyOutDir
+    // （rmSync→trash），导致构建失败。改为首次构建前手动 `rm -rf dist`，
+    // 之后构建原地覆盖（哈希资源名自带内容指纹，旧文件不会被引用）。
+    emptyOutDir: false,
+  },
 })

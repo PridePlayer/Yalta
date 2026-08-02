@@ -1,4 +1,4 @@
-import { useState, useRef, type RefObject } from 'react'
+import { useState, useRef, useEffect, type RefObject } from 'react'
 import { useGameState } from './state/gameStore'
 import { useConnection, useRoom, useSelf } from './net/client'
 import { MetricsPanel } from './components/MetricsPanel'
@@ -7,6 +7,9 @@ import { ActionCard } from './components/ActionCard'
 import { Lobby } from './components/Lobby'
 import { IntelDrawer } from './components/IntelDrawer'
 import { PhaseIndicator } from './components/PhaseIndicator'
+import { SessionDots } from './components/SessionDots'
+import { TurnIndicator } from './components/TurnIndicator'
+import { Tutorial } from './components/Tutorial'
 import { VenueMap } from './components/VenueMap'
 import { ProtocolPanel } from './components/ProtocolPanel'
 import { SettlementScreen } from './components/SettlementScreen'
@@ -27,6 +30,7 @@ export default function App() {
   // 之前 useState/useRef 写在 inLobby 的提前 return 之后，导致大厅态只跑 4 个 Hook、
   // 进入游戏后变成 11 个，触发 “Rendered more hooks” 崩溃、页面只剩横杠。
   const [mobileTab, setMobileTab] = useState('cards')
+  const [showTutorial, setShowTutorial] = useState(false)
   const mapRef = useRef<HTMLDivElement>(null)
   const cardsRef = useRef<HTMLDivElement>(null)
   const eventsRef = useRef<HTMLDivElement>(null)
@@ -35,6 +39,28 @@ export default function App() {
 
   // 未连接 / 连接中 / 已连接但游戏未开始 → 显示大厅
   const inLobby = status !== 'connected' || !room || !room.started
+
+  // 首次进入游戏自动弹出新手教程（localStorage 记忆，可随时点「?」重看）
+  useEffect(() => {
+    if (!inLobby) {
+      let seen = false
+      try {
+        seen = localStorage.getItem('yalta_tutorial_seen') === '1'
+      } catch {
+        seen = false
+      }
+      if (!seen) setShowTutorial(true)
+    }
+  }, [inLobby])
+
+  function closeTutorial() {
+    setShowTutorial(false)
+    try {
+      localStorage.setItem('yalta_tutorial_seen', '1')
+    } catch {
+      /* ignore */
+    }
+  }
   if (inLobby) {
     return <Lobby />
   }
@@ -74,7 +100,10 @@ export default function App() {
       {/* 顶部：会期 + 阶段流程指示器 */}
       <header className="masthead">
         <div className="masthead-title-row">
-          <span className="title-cn">雅尔塔会议</span>
+          <div className="masthead-title-block">
+            <span className="title-cn">雅尔塔会议</span>
+            <SessionDots session={state.session} />
+          </div>
           <div className="masthead-meta">
             <span className="meta-date">{SESSION_DATE[state.session - 1]}</span>
             <span className="meta-sep">·</span>
@@ -87,9 +116,19 @@ export default function App() {
                 <span className="meta-role">{roleLabel(self.role)}</span>
               </>
             )}
+            <button
+              type="button"
+              className="masthead-help"
+              onClick={() => setShowTutorial(true)}
+              aria-label="查看教程"
+              title="查看教程"
+            >
+              ?
+            </button>
           </div>
         </div>
-        <PhaseIndicator phase={state.phase} session={state.session} gameEnded={state.gameEnded} />
+        <PhaseIndicator phase={state.phase} gameEnded={state.gameEnded} />
+        <TurnIndicator phase={state.phase} phaseStartedAt={state.phaseStartedAt} gameEnded={state.gameEnded} />
       </header>
 
       {/* 主区：填满视口的多栏仪表盘（整页不滚动，仅栏内按需滚动） */}
@@ -134,6 +173,9 @@ export default function App() {
 
       {/* 结算总览（第 7 会期闭幕时覆盖展示） */}
       <SettlementScreen />
+
+      {/* 新手教程（首次进入自动弹出；可点报头「?」重看） */}
+      <Tutorial open={showTutorial} onClose={closeTutorial} />
     </div>
   )
 }

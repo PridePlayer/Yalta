@@ -949,9 +949,12 @@ var GameServer = class {
   pendingIntel = [];
   /** 日志自增序号，保证 id 唯一（即便日志被截断也不碰撞） */
   logSeq = 0;
+  /** 当前阶段开始时间戳（epoch ms），用于客户端同步倒计时 */
+  phaseStartedAt = Date.now();
   constructor(seed = 20250204) {
     this.state = createInitialState(seed);
     this.state = this.generatePetitionsAtSessionStart();
+    this.phaseStartedAt = Date.now();
   }
   /** 序列化为客户端可见状态 */
   serialize() {
@@ -959,6 +962,7 @@ var GameServer = class {
     return {
       session: s.session,
       phase: s.phase,
+      phaseStartedAt: this.phaseStartedAt,
       metrics: s.metrics,
       intlOpinion: s.intlOpinion,
       rooseveltHealth: s.rooseveltHealth,
@@ -1202,6 +1206,7 @@ var GameServer = class {
     if (idx < PHASE_ORDER.length - 1) {
       const to = PHASE_ORDER[idx + 1];
       this.state = { ...this.state, phase: to };
+      this.phaseStartedAt = Date.now();
       newLogs.push(this.appendLog(PHASE_NARRATIVE[to], "info"));
     } else {
       if (this.state.session >= TOTAL_SESSIONS) {
@@ -1217,6 +1222,7 @@ var GameServer = class {
       this.settleEventChainsAtSessionEnd(newLogs);
       const nextSession = this.state.session + 1;
       this.state = { ...this.state, session: nextSession, phase: "TOPIC", sovietJammerActive: false };
+      this.phaseStartedAt = Date.now();
       newLogs.push(this.appendLog(`\u2014\u2014 ${SESSION_DATE[nextSession - 1]}\uFF0C\u7B2C ${nextSession} \u4F1A\u671F\u5F00\u59CB \u2014\u2014`, "info"));
       this.generatePetitionsAtSessionStart(newLogs);
     }
@@ -1279,6 +1285,7 @@ var GameServer = class {
   reset(seed) {
     this.state = createInitialState(seed);
     this.state = this.generatePetitionsAtSessionStart();
+    this.phaseStartedAt = Date.now();
   }
 };
 

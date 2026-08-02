@@ -258,6 +258,9 @@ export function ActionCard() {
     })
   }
 
+  // 本阶段「你」可执行的动作数量（用于提示是否轮到你行动）
+  const playableCount = cards.filter((c) => c.playable && c.kind !== 'ended').length
+
   function toggleCard(id: string) {
     setExpanded(expanded === id ? null : id)
   }
@@ -272,6 +275,15 @@ export function ActionCard() {
             {lastResult.success ? '✓' : '✗'} {lastResult.message}
           </span>
         )}
+      </div>
+
+      {/* 行动提示：明确告诉玩家本阶段是否轮到自己行动 */}
+      <div className={`action-cue ${playableCount > 0 ? 'active' : 'idle'}`}>
+        {isObserver
+          ? '你正以旁观者身份静观会议'
+          : playableCount > 0
+            ? `⚡ 现在轮到你行动：本阶段你有 ${playableCount} 项可签发`
+            : '本阶段你暂无动作，静候其他代表或队长推进议程'}
       </div>
 
       {/* 卡牌手牌区 */}
