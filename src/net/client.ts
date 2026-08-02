@@ -66,9 +66,27 @@ function getStore(): ClientStore {
 
 // ========== WebSocket 推导与连接 ==========
 
+// 设备级稳定标识：用于「同一浏览器重连复用同一玩家槽位」，避免房间里出现两个「我」
+const CLIENT_ID_KEY = 'yalta_client_id'
+function getClientId(): string {
+  try {
+    let id = localStorage.getItem(CLIENT_ID_KEY)
+    if (!id) {
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      localStorage.setItem(CLIENT_ID_KEY, id)
+    }
+    return id
+  } catch {
+    // localStorage 不可用（隐私模式等）时退化为会话内随机值
+    return `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  }
+}
+
 function buildWsUrl(roomCode: string, playerName: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const params = new URLSearchParams({ room: roomCode, name: playerName })
+  const params = new URLSearchParams({ room: roomCode, name: playerName, cid: getClientId() })
   return `${proto}://${location.host}/ws?${params.toString()}`
 }
 
@@ -81,13 +99,12 @@ function handleMessage(raw: string) {
   }
   switch (msg.type) {
     case 'ROOM_INFO': {
-      // 从房间玩家列表里找出自己的 playerId（按 name 匹配最稳）
-      // 服务器在 connection 时已记录 playerId，并通过 ROOM_INFO 广播
-      // 我们用最后一次 JOIN 的 playerName 匹配
+      // 优先按设备 clientId 精确匹配自己（服务器以 cid 作为玩家 id）；
+      // 旧服务器/无 cid 时退化为按 name 匹配
+      const myId = getClientId()
       const joinPayload = lastJoinPayload
-      const me = joinPayload
-        ? msg.room.players.find((p) => p.name === joinPayload.playerName)
-        : null
+      const me = msg.room.players.find((p) => p.id === myId)
+        ?? (joinPayload ? msg.room.players.find((p) => p.name === joinPayload.playerName) : null)
       setStore({ room: msg.room, playerId: me?.id ?? store.playerId })
       break
     }
@@ -152,7 +169,7 @@ function doConnect(payload: { roomCode: string; playerName: string; preferredRol
     try { ws.close() } catch { /* ignore */ }
     ws = null
   }
-  setStore({ status: 'connecting', error: null })
+  setStore({ status: 'connecting', error: null, playerId: getClientId() })
 
   const url = buildWsUrl(payload.roomCode, payload.playerName)
   try {

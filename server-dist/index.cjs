@@ -2,6 +2,7 @@
 
 // server/src/index.ts
 var import_ws = require("ws");
+var import_crypto = require("crypto");
 
 // shared/engine/random.ts
 function createRng(seed) {
@@ -886,6 +887,7 @@ var VENUES = [
 
 // server/src/gameServer.ts
 var TOTAL_SESSIONS = 7;
+var MAX_LOGS = Number(process.env.MAX_LOGS) || 500;
 var PHASE_ORDER = ["TOPIC", "VENUE", "MILITARY", "CRISIS", "PRESS"];
 var SESSION_DATE = ["1945\u5E742\u67084\u65E5", "1945\u5E742\u67085\u65E5", "1945\u5E742\u67086\u65E5", "1945\u5E742\u67087\u65E5", "1945\u5E742\u67088\u65E5", "1945\u5E742\u67089\u65E5", "1945\u5E742\u670810\u65E5"];
 var PHASE_NARRATIVE = {
@@ -920,6 +922,8 @@ var KEY_HAN = {
 var GameServer = class {
   state;
   pendingIntel = [];
+  /** 日志自增序号，保证 id 唯一（即便日志被截断也不碰撞） */
+  logSeq = 0;
   constructor(seed = 20250204) {
     this.state = createInitialState(seed);
     this.state = this.generatePetitionsAtSessionStart();
@@ -977,13 +981,14 @@ var GameServer = class {
   }
   appendLog(text, kind) {
     const entry = {
-      id: `log-${this.state.actionCounter}-${this.state.logs.length}`,
+      id: `log-${this.logSeq++}`,
       session: this.state.session,
       phase: this.state.phase,
       text,
       kind
     };
-    this.state = { ...this.state, logs: [...this.state.logs, entry] };
+    const logs = [...this.state.logs, entry];
+    this.state = { ...this.state, logs: logs.length > MAX_LOGS ? logs.slice(logs.length - MAX_LOGS) : logs };
     return entry;
   }
   logDeltas(deltas) {
@@ -1583,9 +1588,16 @@ function seededRandom(state, nation) {
 // server/src/index.ts
 var PORT = Number(process.env.PORT) || 8080;
 var ROOM_EMPTY_GRACE_MS = Number(process.env.ROOM_EMPTY_GRACE_MS) || 5 * 60 * 1e3;
+var MAX_PAYLOAD = Number(process.env.MAX_PAYLOAD) || 1 * 1024 * 1024;
+var HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS) || 3e4;
+var MIN_ACTION_INTERVAL_MS = Number(process.env.MIN_ACTION_INTERVAL_MS) || 150;
 var rooms = /* @__PURE__ */ new Map();
 function genRoomCode() {
-  return Math.random().toString(36).slice(2, 7).toUpperCase();
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = (0, import_crypto.randomBytes)(8);
+  let code = "";
+  for (let i = 0; i < 5; i++) code += alphabet[bytes[i] % alphabet.length];
+  return code;
 }
 function getOrCreateRoom(code) {
   if (!rooms.has(code)) {
@@ -1640,35 +1652,45 @@ function triggerAI(room) {
   });
   broadcastState(room);
 }
-function handleJoin(room, ws, playerName, preferredRole) {
-  const playerId = `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  let role = "SPECTATOR";
-  if (preferredRole) {
-    const taken = [...room.players.values()].some((c) => {
-      if (typeof c.player.role === "string" && typeof preferredRole === "string") return c.player.role === preferredRole;
-      if (typeof c.player.role === "object" && typeof preferredRole === "object") return c.player.role.seatId === preferredRole.seatId;
-      return false;
-    });
-    if (!taken) role = preferredRole;
+function handleJoin(room, ws, playerName, clientId, preferredRole) {
+  const existing = room.players.get(clientId);
+  if (existing) {
+    existing.player.online = true;
+    existing.player.name = playerName;
+    existing.ws = ws;
+    if (existing.removeTimer) {
+      clearTimeout(existing.removeTimer);
+      existing.removeTimer = void 0;
+    }
   } else {
-    const occupied = new Set([...room.players.values()].map((c) => c.player.role));
-    for (const leader of ["LEADER_US", "LEADER_UK", "LEADER_SU"]) {
-      if (!occupied.has(leader)) {
-        role = leader;
-        break;
+    let role = "SPECTATOR";
+    if (preferredRole) {
+      const taken = [...room.players.values()].some((c) => {
+        if (typeof c.player.role === "string" && typeof preferredRole === "string") return c.player.role === preferredRole;
+        if (typeof c.player.role === "object" && typeof preferredRole === "object") return c.player.role.seatId === preferredRole.seatId;
+        return false;
+      });
+      if (!taken) role = preferredRole;
+    } else {
+      const occupied = new Set([...room.players.values()].map((c) => c.player.role));
+      for (const leader of ["LEADER_US", "LEADER_UK", "LEADER_SU"]) {
+        if (!occupied.has(leader)) {
+          role = leader;
+          break;
+        }
       }
     }
+    const player = { id: clientId, name: playerName, role, online: true };
+    room.players.set(clientId, { ws, player });
   }
-  const player = { id: playerId, name: playerName, role, online: true };
-  room.players.set(playerId, { ws, player });
   if (room.destroyTimer) {
     clearTimeout(room.destroyTimer);
     room.destroyTimer = void 0;
   }
   ;
-  ws.playerId = playerId;
+  ws.playerId = clientId;
   ws.roomCode = room.code;
-  return playerId;
+  return clientId;
 }
 function handleMessage(ws, raw) {
   let msg;
@@ -1720,6 +1742,14 @@ function handleMessage(ws, raw) {
       break;
     }
     case "ACTION": {
+      const now = Date.now();
+      const last = ws.lastActionAt || 0;
+      if (now - last < MIN_ACTION_INTERVAL_MS) {
+        ws.send(JSON.stringify({ type: "ERROR", message: "\u64CD\u4F5C\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5" }));
+        return;
+      }
+      ;
+      ws.lastActionAt = now;
       if (!room.started) {
         ws.send(JSON.stringify({ type: "ERROR", message: "\u6E38\u620F\u672A\u5F00\u59CB" }));
         return;
@@ -1758,7 +1788,9 @@ function handleMessage(ws, raw) {
       broadcastRoomInfo(room);
       if (room.singlePlayer) {
         resetAIActed();
-        setTimeout(() => triggerAI(room), 600);
+        setTimeout(() => {
+          if (rooms.has(room.code)) triggerAI(room);
+        }, 600);
       }
       break;
     }
@@ -1780,9 +1812,11 @@ function handleDisconnect(ws) {
   const room = rooms.get(roomCode);
   if (!room || !playerId) return;
   const conn = room.players.get(playerId);
-  if (conn) conn.player.online = false;
-  setTimeout(() => {
-    if (room.players.get(playerId)?.ws.readyState === import_ws.WebSocket.CLOSED) {
+  if (!conn || conn.ws !== ws) return;
+  conn.player.online = false;
+  conn.removeTimer = setTimeout(() => {
+    const c = room.players.get(playerId);
+    if (c && c.ws.readyState === import_ws.WebSocket.CLOSED) {
       room.players.delete(playerId);
       broadcastRoomInfo(room);
       if (room.players.size === 0 && !room.destroyTimer) {
@@ -1794,19 +1828,41 @@ function handleDisconnect(ws) {
     }
   }, 3e4);
 }
-var wss = new import_ws.WebSocketServer({ port: PORT, host: "127.0.0.1", path: "/ws" });
+var wss = new import_ws.WebSocketServer({ port: PORT, host: "127.0.0.1", path: "/ws", maxPayload: MAX_PAYLOAD });
+var heartbeat = setInterval(() => {
+  wss.clients.forEach((client) => {
+    const c = client;
+    if (c.isAlive === false) {
+      c.terminate();
+      return;
+    }
+    c.isAlive = false;
+    c.ping();
+  });
+}, HEARTBEAT_MS);
+heartbeat.unref?.();
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const roomCode = url.searchParams.get("room") || genRoomCode();
+  let roomCode = url.searchParams.get("room") || "";
+  if (!roomCode) {
+    do {
+      roomCode = genRoomCode();
+    } while (rooms.has(roomCode));
+  }
   const playerName = url.searchParams.get("name") || "\u533F\u540D\u4EE3\u8868";
+  const clientId = url.searchParams.get("cid") || `c-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  ws.isAlive = true;
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
   const room = getOrCreateRoom(roomCode);
-  const playerId = handleJoin(room, ws, playerName);
+  handleJoin(room, ws, playerName, clientId);
   broadcastRoomInfo(room);
   if (room.started) {
     ws.send(JSON.stringify({ type: "STATE", state: room.game.serialize() }));
   }
   ws.on("message", (data) => handleMessage(ws, data.toString()));
   ws.on("close", () => handleDisconnect(ws));
-  console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] ${playerName} joined room ${roomCode} (${room.players.size} players)`);
+  console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] ${playerName} (${clientId}) joined room ${roomCode} (${room.players.size} players)`);
 });
 console.log(`Yalta WebSocket server on :${PORT}/ws`);

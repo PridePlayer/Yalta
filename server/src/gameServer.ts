@@ -17,6 +17,8 @@ import { VENUES } from '../../shared/data/venues'
 import type { GameAction, PrivateIntel, SerializableGameState, LogEntryDTO } from '../../shared/protocol'
 
 const TOTAL_SESSIONS = 7
+// 存储日志上限（默认 500 条），超出后丢弃最旧，避免内存与每次 STATE 广播体积无限增长
+const MAX_LOGS = Number(process.env.MAX_LOGS) || 500
 const PHASE_ORDER = ['TOPIC', 'VENUE', 'MILITARY', 'CRISIS', 'PRESS'] as const
 const SESSION_DATE = ['1945年2月4日', '1945年2月5日', '1945年2月6日', '1945年2月7日', '1945年2月8日', '1945年2月9日', '1945年2月10日']
 const PHASE_NARRATIVE: Record<string, string> = {
@@ -61,6 +63,8 @@ export interface ActionResult {
 export class GameServer {
   state: GameState
   private pendingIntel: PrivateIntel[] = []
+  /** 日志自增序号，保证 id 唯一（即便日志被截断也不碰撞） */
+  private logSeq = 0
 
   constructor(seed: number = 20250204) {
     this.state = createInitialState(seed)
@@ -113,12 +117,13 @@ export class GameServer {
 
   private appendLog(text: string, kind: LogEntry['kind']): LogEntry {
     const entry: LogEntry = {
-      id: `log-${this.state.actionCounter}-${this.state.logs.length}`,
+      id: `log-${this.logSeq++}`,
       session: this.state.session,
       phase: this.state.phase,
       text, kind,
     }
-    this.state = { ...this.state, logs: [...this.state.logs, entry] }
+    const logs = [...this.state.logs, entry]
+    this.state = { ...this.state, logs: logs.length > MAX_LOGS ? logs.slice(logs.length - MAX_LOGS) : logs }
     return entry
   }
 

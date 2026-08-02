@@ -2,6 +2,7 @@
 // 同域托管：Nginx 将 /ws 代理到本进程
 
 import { WebSocketServer, WebSocket } from 'ws'
+import { randomBytes } from 'crypto'
 import { GameServer } from './gameServer'
 import { canPerformAction, canAdvancePhase, canReset } from './permissions'
 import { runAIPlayers, resetAIActed } from './aiPlayer'
@@ -12,10 +13,16 @@ import type { Nation } from '../../shared/domain/types'
 const PORT = Number(process.env.PORT) || 8080
 // 房间空置后的宽限销毁时间（毫秒），可用环境变量 ROOM_EMPTY_GRACE_MS 覆盖，默认 5 分钟
 const ROOM_EMPTY_GRACE_MS = Number(process.env.ROOM_EMPTY_GRACE_MS) || 5 * 60 * 1000
+// 单条消息最大体积（防止超大帧吃内存），默认 1MB
+const MAX_PAYLOAD = Number(process.env.MAX_PAYLOAD) || 1 * 1024 * 1024
+// 心跳探测间隔（毫秒）：检测静默断开，保证 close 能正常触发以清理房间/玩家
+const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS) || 30000
+// 单连接动作最小间隔（毫秒），防止单个客户端刷广播（广播放大）
+const MIN_ACTION_INTERVAL_MS = Number(process.env.MIN_ACTION_INTERVAL_MS) || 150
 
 interface Room {
   code: string
-  players: Map<string, { ws: WebSocket; player: Player }>
+  players: Map<string, { ws: WebSocket; player: Player; removeTimer?: ReturnType<typeof setTimeout> }>
   game: GameServer
   started: boolean
   /** 单人模式：AI 接管未被真人占据的队长位 */
@@ -29,7 +36,12 @@ interface Room {
 const rooms = new Map<string, Room>()
 
 function genRoomCode(): string {
-  return Math.random().toString(36).slice(2, 7).toUpperCase()
+  // 用 crypto 生成不可预测的房间码，并避开易混淆字符（0/O/1/I）
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const bytes = randomBytes(8)
+  let code = ''
+  for (let i = 0; i < 5; i++) code += alphabet[bytes[i] % alphabet.length]
+  return code
 }
 
 function getOrCreateRoom(code: string): Room {
@@ -93,39 +105,50 @@ function triggerAI(room: Room): void {
   broadcastState(room)
 }
 
-function handleJoin(room: Room, ws: WebSocket, playerName: string, preferredRole?: PlayerRole): string {
-  const playerId = `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-  // 自动分配角色：若无偏好则分配空闲队长，否则旁观
-  let role: PlayerRole = 'SPECTATOR'
-  if (preferredRole) {
-    // 检查角色是否被占用
-    const taken = [...room.players.values()].some((c) => {
-      if (typeof c.player.role === 'string' && typeof preferredRole === 'string') return c.player.role === preferredRole
-      if (typeof c.player.role === 'object' && typeof preferredRole === 'object') return (c.player.role as any).seatId === (preferredRole as any).seatId
-      return false
-    })
-    if (!taken) role = preferredRole
+function handleJoin(room: Room, ws: WebSocket, playerName: string, clientId: string, preferredRole?: PlayerRole): string {
+  const existing = room.players.get(clientId)
+  if (existing) {
+    // 同一设备重连：复用原玩家槽位，避免出现两个「我」
+    existing.player.online = true
+    existing.player.name = playerName
+    existing.ws = ws
+    if (existing.removeTimer) {
+      clearTimeout(existing.removeTimer)
+      existing.removeTimer = undefined
+    }
   } else {
-    // 自动分配空闲队长
-    const occupied = new Set([...room.players.values()].map((c) => c.player.role))
-    for (const leader of ['LEADER_US', 'LEADER_UK', 'LEADER_SU'] as const) {
-      if (!occupied.has(leader)) {
-        role = leader
-        break
+    // 自动分配角色：若无偏好则分配空闲队长，否则旁观
+    let role: PlayerRole = 'SPECTATOR'
+    if (preferredRole) {
+      // 检查角色是否被占用
+      const taken = [...room.players.values()].some((c) => {
+        if (typeof c.player.role === 'string' && typeof preferredRole === 'string') return c.player.role === preferredRole
+        if (typeof c.player.role === 'object' && typeof preferredRole === 'object') return (c.player.role as any).seatId === (preferredRole as any).seatId
+        return false
+      })
+      if (!taken) role = preferredRole
+    } else {
+      // 自动分配空闲队长
+      const occupied = new Set([...room.players.values()].map((c) => c.player.role))
+      for (const leader of ['LEADER_US', 'LEADER_UK', 'LEADER_SU'] as const) {
+        if (!occupied.has(leader)) {
+          role = leader
+          break
+        }
       }
     }
-  }
 
-  const player: Player = { id: playerId, name: playerName, role, online: true }
-  room.players.set(playerId, { ws, player })
+    const player: Player = { id: clientId, name: playerName, role, online: true }
+    room.players.set(clientId, { ws, player })
+  }
   // 有玩家加入/重连，取消该房间的待销毁定时器
   if (room.destroyTimer) {
     clearTimeout(room.destroyTimer)
     room.destroyTimer = undefined
   }
-  ;(ws as any).playerId = playerId
+  ;(ws as any).playerId = clientId
   ;(ws as any).roomCode = room.code
-  return playerId
+  return clientId
 }
 
 function handleMessage(ws: WebSocket, raw: string): void {
@@ -185,6 +208,14 @@ function handleMessage(ws: WebSocket, raw: string): void {
     }
 
     case 'ACTION': {
+      // 简易频率限制，防止单个客户端刷广播（广播放大）
+      const now = Date.now()
+      const last = (ws as any).lastActionAt || 0
+      if (now - last < MIN_ACTION_INTERVAL_MS) {
+        ws.send(JSON.stringify({ type: 'ERROR', message: '操作过于频繁，请稍后再试' }))
+        return
+      }
+      ;(ws as any).lastActionAt = now
       if (!room.started) {
         ws.send(JSON.stringify({ type: 'ERROR', message: '游戏未开始' }))
         return
@@ -229,7 +260,7 @@ function handleMessage(ws: WebSocket, raw: string): void {
       if (room.singlePlayer) {
         resetAIActed()
         // 延迟触发，模拟 AI 思考
-        setTimeout(() => triggerAI(room), 600)
+        setTimeout(() => { if (rooms.has(room.code)) triggerAI(room) }, 600)
       }
       break
     }
@@ -253,10 +284,14 @@ function handleDisconnect(ws: WebSocket): void {
   const room = rooms.get(roomCode)
   if (!room || !playerId) return
   const conn = room.players.get(playerId)
-  if (conn) conn.player.online = false
-  // 延迟移除（允许重连）
-  setTimeout(() => {
-    if (room.players.get(playerId)?.ws.readyState === WebSocket.CLOSED) {
+  // 仅当断开的是该玩家「当前」连接时才处理：重连后旧 ws 应忽略，
+  // 否则会把已经在线（已用新连接接管）的玩家误标为离线
+  if (!conn || conn.ws !== ws) return
+  conn.player.online = false
+  // 延迟移除（允许重连）；记录定时器以便重连时取消
+  conn.removeTimer = setTimeout(() => {
+    const c = room.players.get(playerId)
+    if (c && c.ws.readyState === WebSocket.CLOSED) {
       room.players.delete(playerId)
       broadcastRoomInfo(room)
       // 房间已空：启动宽限销毁定时器，避免内存无限累积
@@ -270,16 +305,40 @@ function handleDisconnect(ws: WebSocket): void {
   }, 30000)
 }
 
-const wss = new WebSocketServer({ port: PORT, host: '127.0.0.1', path: '/ws' })
+const wss = new WebSocketServer({ port: PORT, host: '127.0.0.1', path: '/ws', maxPayload: MAX_PAYLOAD })
+
+// 心跳：定期探测死连接，触发 close 以正常清理房间/玩家（避免静默断开导致泄漏）
+const heartbeat = setInterval(() => {
+  wss.clients.forEach((client) => {
+    const c = client as any
+    if (c.isAlive === false) {
+      c.terminate()
+      return
+    }
+    c.isAlive = false
+    c.ping()
+  })
+}, HEARTBEAT_MS)
+// 心跳定时器不应阻止进程退出
+;(heartbeat as any).unref?.()
 
 wss.on('connection', (ws, req) => {
-  // 从 URL 提取房间码和玩家名：/ws?room=XXXX&name=YYY
+  // 从 URL 提取房间码、玩家名与设备标识：/ws?room=XXXX&name=YYY&cid=ZZZ
   const url = new URL(req.url!, `http://${req.headers.host}`)
-  const roomCode = url.searchParams.get('room') || genRoomCode()
+  let roomCode = url.searchParams.get('room') || ''
+  if (!roomCode) {
+    // 自动生成且确保不与现有房间冲突，避免误入他人对局
+    do { roomCode = genRoomCode() } while (rooms.has(roomCode))
+  }
   const playerName = url.searchParams.get('name') || '匿名代表'
+  const clientId = url.searchParams.get('cid') || `c-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+
+  // 心跳标记
+  ;(ws as any).isAlive = true
+  ws.on('pong', () => { (ws as any).isAlive = true })
 
   const room = getOrCreateRoom(roomCode)
-  const playerId = handleJoin(room, ws, playerName)
+  handleJoin(room, ws, playerName, clientId)
 
   // 发送房间信息
   broadcastRoomInfo(room)
@@ -291,7 +350,7 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (data) => handleMessage(ws, data.toString()))
   ws.on('close', () => handleDisconnect(ws))
 
-  console.log(`[${new Date().toISOString()}] ${playerName} joined room ${roomCode} (${room.players.size} players)`)
+  console.log(`[${new Date().toISOString()}] ${playerName} (${clientId}) joined room ${roomCode} (${room.players.size} players)`)
 })
 
 console.log(`Yalta WebSocket server on :${PORT}/ws`)
