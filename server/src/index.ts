@@ -288,6 +288,9 @@ function handleDisconnect(ws: WebSocket): void {
   // 否则会把已经在线（已用新连接接管）的玩家误标为离线
   if (!conn || conn.ws !== ws) return
   conn.player.online = false
+  // 立刻广播房间信息：让所有客户端当下看到该玩家「下线」（变灰），
+  // 否则其他端会一直缓存旧的 online:true，直到 30s 后移除才刷新
+  broadcastRoomInfo(room)
   // 延迟移除（允许重连）；记录定时器以便重连时取消
   conn.removeTimer = setTimeout(() => {
     const c = room.players.get(playerId)

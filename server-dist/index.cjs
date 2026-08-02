@@ -1814,6 +1814,7 @@ function handleDisconnect(ws) {
   const conn = room.players.get(playerId);
   if (!conn || conn.ws !== ws) return;
   conn.player.online = false;
+  broadcastRoomInfo(room);
   conn.removeTimer = setTimeout(() => {
     const c = room.players.get(playerId);
     if (c && c.ws.readyState === import_ws.WebSocket.CLOSED) {
