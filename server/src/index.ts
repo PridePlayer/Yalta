@@ -10,6 +10,8 @@ import { roleNation, isLeader } from '../../shared/protocol'
 import type { Nation } from '../../shared/domain/types'
 
 const PORT = Number(process.env.PORT) || 8080
+// 房间空置后的宽限销毁时间（毫秒），可用环境变量 ROOM_EMPTY_GRACE_MS 覆盖，默认 5 分钟
+const ROOM_EMPTY_GRACE_MS = Number(process.env.ROOM_EMPTY_GRACE_MS) || 5 * 60 * 1000
 
 interface Room {
   code: string
@@ -20,6 +22,8 @@ interface Room {
   singlePlayer: boolean
   /** AI 控制的国家列表 */
   aiNations: Nation[]
+  /** 房间空置后的销毁定时器（所有人离开且宽限超时则删除房间释放内存） */
+  destroyTimer?: ReturnType<typeof setTimeout>
 }
 
 const rooms = new Map<string, Room>()
@@ -114,6 +118,11 @@ function handleJoin(room: Room, ws: WebSocket, playerName: string, preferredRole
 
   const player: Player = { id: playerId, name: playerName, role, online: true }
   room.players.set(playerId, { ws, player })
+  // 有玩家加入/重连，取消该房间的待销毁定时器
+  if (room.destroyTimer) {
+    clearTimeout(room.destroyTimer)
+    room.destroyTimer = undefined
+  }
   ;(ws as any).playerId = playerId
   ;(ws as any).roomCode = room.code
   return playerId
@@ -250,6 +259,13 @@ function handleDisconnect(ws: WebSocket): void {
     if (room.players.get(playerId)?.ws.readyState === WebSocket.CLOSED) {
       room.players.delete(playerId)
       broadcastRoomInfo(room)
+      // 房间已空：启动宽限销毁定时器，避免内存无限累积
+      if (room.players.size === 0 && !room.destroyTimer) {
+        room.destroyTimer = setTimeout(() => {
+          rooms.delete(room.code)
+          console.log(`[${new Date().toISOString()}] room ${room.code} destroyed (empty, grace ${ROOM_EMPTY_GRACE_MS}ms)`)
+        }, ROOM_EMPTY_GRACE_MS)
+      }
     }
   }, 30000)
 }

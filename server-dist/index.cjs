@@ -1582,6 +1582,7 @@ function seededRandom(state, nation) {
 
 // server/src/index.ts
 var PORT = Number(process.env.PORT) || 8080;
+var ROOM_EMPTY_GRACE_MS = Number(process.env.ROOM_EMPTY_GRACE_MS) || 5 * 60 * 1e3;
 var rooms = /* @__PURE__ */ new Map();
 function genRoomCode() {
   return Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -1660,6 +1661,11 @@ function handleJoin(room, ws, playerName, preferredRole) {
   }
   const player = { id: playerId, name: playerName, role, online: true };
   room.players.set(playerId, { ws, player });
+  if (room.destroyTimer) {
+    clearTimeout(room.destroyTimer);
+    room.destroyTimer = void 0;
+  }
+  ;
   ws.playerId = playerId;
   ws.roomCode = room.code;
   return playerId;
@@ -1779,6 +1785,12 @@ function handleDisconnect(ws) {
     if (room.players.get(playerId)?.ws.readyState === import_ws.WebSocket.CLOSED) {
       room.players.delete(playerId);
       broadcastRoomInfo(room);
+      if (room.players.size === 0 && !room.destroyTimer) {
+        room.destroyTimer = setTimeout(() => {
+          rooms.delete(room.code);
+          console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] room ${room.code} destroyed (empty, grace ${ROOM_EMPTY_GRACE_MS}ms)`);
+        }, ROOM_EMPTY_GRACE_MS);
+      }
     }
   }, 3e4);
 }
